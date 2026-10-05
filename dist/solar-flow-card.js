@@ -3520,6 +3520,7 @@ function buildEditorHTML(cfg) {
         <select class="sfc-ed-input" data-key="language" style="cursor:pointer;">
           <option value="fr" ${(c.language||"fr")==="fr"?"selected":""}>🇫🇷 Français</option>
           <option value="en" ${(c.language||"fr")==="en"?"selected":""}>🇬🇧 English</option>
+          <option value="vi" ${(c.language||"fr")==="vi"?"selected":""}>🇻🇳 Tiếng Việt</option>
         </select>
       </div>
     `)}
