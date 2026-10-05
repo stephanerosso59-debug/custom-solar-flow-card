@@ -8,7 +8,7 @@
  */
 
 // ── Version — modifier uniquement ici ──────────────────────
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 
 // ══════════════════════════════════════════════════════════
 //  SOMMAIRE / TABLE OF CONTENTS   (Ctrl-F le libellé « //  NOM »)
@@ -5647,10 +5647,13 @@ class SolarFlowCard extends HTMLElement {
     // Status badge
     const sb = this._el('sfcStatus');
     if (sb) {
+      // Priorité à batt_power (respecte batt_power_invert) ; repli sur l'heuristique
+      // home/pv uniquement si batt_power n'est pas configuré ou proche de zéro.
+      const battDirKnown = battPower !== null && Math.abs(battPower) > 10;
       let st = 'idle', txt = t(c,'status_idle');
       if (pvW > 50)                       { txt = t(c,'status_producing'); st = 'producing'; }
-      if (battSoc < 99 && pvW > 100)      { txt = t(c,'status_charging');  st = 'charging';  }
-      if (homeW > pvW + 100)              { txt = t(c,'status_discharge'); st = 'discharging'; }
+      if (battDirKnown ? battPower > 50 : (battSoc < 99 && pvW > 100))      { txt = t(c,'status_charging');  st = 'charging';  }
+      if (battDirKnown ? battPower < -50 : (homeW > pvW + 100))              { txt = t(c,'status_discharge'); st = 'discharging'; }
       sb.textContent = txt; sb.className = 'sfc-badge ' + st;
     }
 
