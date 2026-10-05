@@ -8,7 +8,7 @@
  */
 
 // ── Version — modifier uniquement ici ──────────────────────
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 
 // ══════════════════════════════════════════════════════════
 //  SOMMAIRE / TABLE OF CONTENTS   (Ctrl-F le libellé « //  NOM »)
@@ -5748,7 +5748,11 @@ class SolarFlowCard extends HTMLElement {
     }
 
     const lb = this._el('sfcLB');
-    const isDischarging = homeW > pvW + 100;
+    // Direction du flux batterie : priorité à battPower (respecte batt_power_invert — fiable
+    // même en charge réseau) ; repli sur l'heuristique home/pv seulement si battPower absent.
+    const isDischarging = (battPower !== null && Math.abs(battPower) > 10)
+      ? battPower < 0
+      : homeW > pvW + 100;
     if (lb) {
       const battFlowIds  = ['sfcLB','sfcLBTailLong','sfcLBTailMid','sfcLBGlow'];
       const battFlowIds_s= ['sfcLB_s','sfcLBTailLong_s','sfcLBTailMid_s','sfcLBGlow_s'];
@@ -6175,7 +6179,12 @@ class SolarFlowCard extends HTMLElement {
     // Ligne batterie depuis dernier routeur (ou maison)
     const lastX = routerXs.length > 0 ? routerXs[routerXs.length-1] : 210;
     const lineBatt = this._el('sfcLB');
-    const isDischarging = this._getNum(this._cfg.home_power) > this._getNum(this._cfg.pv_power) + 100;
+    // Même logique que dans _update() : priorité à batt_power (respecte batt_power_invert).
+    let battPowerR = c.batt_power ? this._getNum(c.batt_power) : null;
+    if (battPowerR !== null && c.batt_power_invert) battPowerR = -battPowerR;
+    const isDischarging = (battPowerR !== null && Math.abs(battPowerR) > 10)
+      ? battPowerR < 0
+      : this._getNum(this._cfg.home_power) > this._getNum(this._cfg.pv_power) + 100;
     if (lineBatt && nRouters > 0) {
       const battFlowIds = ['sfcLB','sfcLBTailLong','sfcLBTailMid','sfcLBGlow'];
       if (isDischarging) {
