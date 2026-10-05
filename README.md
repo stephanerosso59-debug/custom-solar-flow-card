@@ -7,7 +7,7 @@
 **🇫🇷 Français** · [🇬🇧 English](README.en.md)
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 [![Ouvrir dans Home Assistant et ajouter ce dépôt à HACS](https://my.home-assistant.io/badges/hacs_repository.svg)][install]
@@ -137,7 +137,7 @@ batt_soc: sensor.battery_soc
 | Option | Type | Défaut | Description |
 |---|---|---|---|
 | `title` | string | `Solar Flow` | Titre affiché en haut de la carte |
-| `language` | string | `fr` | Langue : `fr` ou `en` |
+| `language` | string | `fr` | Langue : `fr`, `en` ou `vi` |
 | `latitude` | number | _(maison HA)_ | Latitude pour le calcul de la position du soleil. Vide = localisation de la maison Home Assistant |
 | `longitude` | number | _(maison HA)_ | Longitude. Vide = localisation de la maison Home Assistant |
 | `pv_max_watts` | number | `2500` | Puissance crête de l'installation (W) — pour la barre de progression PV |

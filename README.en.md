@@ -7,7 +7,7 @@
 [🇫🇷 Français](README.md) · **🇬🇧 English**
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 [![Open your Home Assistant instance and add this repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)][install]
@@ -132,7 +132,7 @@ batt_soc: sensor.battery_soc
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `title` | string | `Solar Flow` | Title shown at the top of the card |
-| `language` | string | `fr` | Language: `fr` or `en` |
+| `language` | string | `fr` | Language: `fr`, `en` or `vi` |
 | `latitude` | number | _(HA home)_ | Latitude for the sun position calculation. Empty = Home Assistant home location |
 | `longitude` | number | _(HA home)_ | Longitude. Empty = Home Assistant home location |
 | `pv_max_watts` | number | `2500` | Peak power of the installation (W) — for the PV progress bar |

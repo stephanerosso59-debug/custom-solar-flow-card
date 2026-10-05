@@ -8,7 +8,7 @@
  */
 
 // ── Version — modifier uniquement ici ──────────────────────
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 
 // ══════════════════════════════════════════════════════════
 //  SOMMAIRE / TABLE OF CONTENTS   (Ctrl-F le libellé « //  NOM »)
