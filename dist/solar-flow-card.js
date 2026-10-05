@@ -8,7 +8,7 @@
  */
 
 // ── Version — modifier uniquement ici ──────────────────────
-const VERSION = '1.3.2';
+const VERSION = '1.3.3';
 
 // ══════════════════════════════════════════════════════════
 //  SOMMAIRE / TABLE OF CONTENTS   (Ctrl-F le libellé « //  NOM »)
@@ -5631,6 +5631,12 @@ class SolarFlowCard extends HTMLElement {
     let battPower = c.batt_power ? this._getNum(c.batt_power) : null;
     // Convention attendue : + = charge, − = décharge. Inverser si l'entité fait l'inverse.
     if (battPower !== null && c.batt_power_invert) battPower = -battPower;
+    // Source de vérité unique pour le sens charge/décharge : on privilégie le signe de
+    // batt_power (déjà corrigé par batt_power_invert), fiable même en charge depuis le réseau.
+    // Repli sur l'heuristique PV/maison uniquement si l'entité est absente ou négligeable.
+    const battDirKnown = battPower !== null && Math.abs(battPower) > 10;
+    const battIsChg = battDirKnown ? battPower >  50 : (battSoc < 99 && pvW > 100);
+    const battIsDis = battDirKnown ? battPower < -50 : (homeW > pvW + 100);
     const minCell  = this._getNum(c.min_cell);
     const maxCell  = this._getNum(c.max_cell);
     const battDis  = this._getNum(c.batt_dis_today);
@@ -5649,11 +5655,10 @@ class SolarFlowCard extends HTMLElement {
     if (sb) {
       // Priorité à batt_power (respecte batt_power_invert) ; repli sur l'heuristique
       // home/pv uniquement si batt_power n'est pas configuré ou proche de zéro.
-      const battDirKnown = battPower !== null && Math.abs(battPower) > 10;
       let st = 'idle', txt = t(c,'status_idle');
-      if (pvW > 50)                       { txt = t(c,'status_producing'); st = 'producing'; }
-      if (battDirKnown ? battPower > 50 : (battSoc < 99 && pvW > 100))      { txt = t(c,'status_charging');  st = 'charging';  }
-      if (battDirKnown ? battPower < -50 : (homeW > pvW + 100))              { txt = t(c,'status_discharge'); st = 'discharging'; }
+      if (pvW > 50)   { txt = t(c,'status_producing'); st = 'producing'; }
+      if (battIsChg)  { txt = t(c,'status_charging');  st = 'charging';  }
+      if (battIsDis)  { txt = t(c,'status_discharge'); st = 'discharging'; }
       sb.textContent = txt; sb.className = 'sfc-badge ' + st;
     }
 
@@ -5685,10 +5690,10 @@ class SolarFlowCard extends HTMLElement {
     const battWrapper = this._el('sfcBattWrapper');
     const battSocTxt  = this._el('sfcBattSocText');
     if (battSocTxt) battSocTxt.textContent = Math.round(battSoc) + '%';
-    const battState = battSoc < 15          ? 'low'
-                    : battSoc < 99.5 && pvW > 100  ? 'charging'
-                    : homeW > pvW + 100             ? 'discharging'
-                    :                                 'idle';
+    const battState = battSoc < 15 ? 'low'
+                    : battIsChg    ? 'charging'
+                    : battIsDis    ? 'discharging'
+                    :                'idle';
     if (battWrapper) {
       battWrapper.classList.remove('charging','discharging','low');
       if (battState !== 'idle') battWrapper.classList.add(battState);
@@ -5723,8 +5728,8 @@ class SolarFlowCard extends HTMLElement {
     const battNode = this._el('sfcNodeBatt');
     if (battNode) {
       battNode.classList.remove('charging','discharging');
-      if (battSoc < 99 && pvW > 100)  battNode.classList.add('charging');
-      else if (homeW > pvW + 100)     battNode.classList.add('discharging');
+      if (battIsChg)      battNode.classList.add('charging');
+      else if (battIsDis) battNode.classList.add('discharging');
     }
     const gridNode = this._el('sfcNodeGrid');
     if (gridNode) gridNode.style.filter = gridW > 50 ? 'drop-shadow(0 0 10px rgba(79,195,247,0.5))' : '';
@@ -5751,11 +5756,7 @@ class SolarFlowCard extends HTMLElement {
     }
 
     const lb = this._el('sfcLB');
-    // Direction du flux batterie : priorité à battPower (respecte batt_power_invert — fiable
-    // même en charge réseau) ; repli sur l'heuristique home/pv seulement si battPower absent.
-    const isDischarging = (battPower !== null && Math.abs(battPower) > 10)
-      ? battPower < 0
-      : homeW > pvW + 100;
+    const isDischarging = battIsDis;
     if (lb) {
       const battFlowIds  = ['sfcLB','sfcLBTailLong','sfcLBTailMid','sfcLBGlow'];
       const battFlowIds_s= ['sfcLB_s','sfcLBTailLong_s','sfcLBTailMid_s','sfcLBGlow_s'];
@@ -5817,10 +5818,8 @@ class SolarFlowCard extends HTMLElement {
       } else {
         // Cas 2 : capteur 0/1 ou rien → charge/décharge déduits de la puissance réelle
         // (battPower > 0 = charge, < 0 = décharge) ou, à défaut, du bilan PV/maison.
-        const isChg = rawLc === '0' || rawLc === 'charge'
-                   || (battPower !== null ? battPower > 50 : (pvW > 50 && homeW < pvW));
-        const isDis = rawLc === '1' || rawLc === 'discharge'
-                   || (battPower !== null ? battPower < -50 : homeW > pvW + 100);
+        const isChg = rawLc === '0' || rawLc === 'charge'    || battIsChg;
+        const isDis = rawLc === '1' || rawLc === 'discharge' || battIsDis;
         const mc = isDis ? 'discharge' : isChg ? 'charge' : 'idle';
         modeEl.textContent = isDis ? t(c,'mode_discharge') : isChg ? t(c,'mode_charge') : t(c,'mode_idle');
         modeEl.className = 'sfc-mode ' + mc;
