@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ╔══════════════════════════════════════════════════════════╗
  * ║          SOLAR FLOW CARD — Home Assistant                ║
  * ║    Custom Lovelace Card                                  ║
@@ -8,7 +8,7 @@
  */
 
 // ── Version — modifier uniquement ici ──────────────────────
-const VERSION = '1.3.3';
+const VERSION = '1.4.0';
 
 // ══════════════════════════════════════════════════════════
 //  SOMMAIRE / TABLE OF CONTENTS   (Ctrl-F le libellé « //  NOM »)
@@ -4416,7 +4416,11 @@ class SolarFlowCard extends HTMLElement {
           const navPath = this._cfg['nav_' + el.dataset.detail];
           if (navPath) {
             history.pushState(null, '', navPath);
-            window.dispatchEvent(new Event('location-changed', { bubbles: true, composed: true }));
+            // CustomEvent + detail.replace : format attendu par le routeur de HA
+            // (home-assistant-main lit ev.detail?.replace).
+            window.dispatchEvent(new CustomEvent('location-changed', {
+              detail: { replace: false }, bubbles: true, composed: true,
+            }));
             return;
           }
           this._openDetail(el.dataset.detail);

@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="logo.svg" alt="Solar Flow Card" width="420"/>
 </p>
 
@@ -7,7 +7,7 @@
 [🇫🇷 Français](README.md) · **🇬🇧 English**
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-![Version](https://img.shields.io/badge/version-1.3.3-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 [![Open your Home Assistant instance and add this repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)][install]
@@ -655,6 +655,26 @@ show_conso_cost:   true    # Daily grid cost
 ```
 
 > 🔢 **3 (combinable) ways to show a zone's daily energy**: **pop-up** on click (`details_on_click`), thematic **block** at the bottom (Consumption / Battery / Routers), and **secondary info** on the scene (`show_scene_secondary`, single mode). In single mode the chip sub-lines then show: Grid → `↓import ↑export`, Home → consumption, Battery → `↑charge ↓discharge`, Spa → today's energy.
+
+### Click navigation (`nav_<zone>`)
+
+By default, clicking a scene zone opens the built-in details panel. You can instead redirect that click — **per zone** — to one of your dashboard views, which is handy to jump to a dedicated page (Energy charts, history, inverter settings…).
+
+**YAML-only** option (no visual editor equivalent yet):
+
+```yaml
+nav_pv:      /lovelace/solar      # Click on the PV badge → "solar" view
+nav_grid:    /lovelace/grid
+nav_home:    /lovelace/home
+nav_battery: /lovelace/battery
+nav_ev:      /lovelace/car
+nav_router1: /lovelace/routers    # same for nav_router2, nav_router3, nav_router4
+```
+
+- Available zones: `pv`, `grid`, `home`, `battery`, `ev`, `router1` → `router4`.
+- **Option absent → unchanged behaviour**: the details panel opens as usual. You can therefore define only one or two of them.
+- The value is a dashboard path (e.g. `/lovelace/0`, `/my-dashboard/energy`).
+- ⚠️ Requires `details_on_click: true` (the default): if click-to-details is disabled, navigation is disabled too.
 
 ### Section order
 

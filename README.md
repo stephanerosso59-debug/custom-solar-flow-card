@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="logo.svg" alt="Solar Flow Card" width="420"/>
 </p>
 
@@ -7,7 +7,7 @@
 **🇫🇷 Français** · [🇬🇧 English](README.en.md)
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-![Version](https://img.shields.io/badge/version-1.3.3-blue.svg)
+![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 [![Ouvrir dans Home Assistant et ajouter ce dépôt à HACS](https://my.home-assistant.io/badges/hacs_repository.svg)][install]
@@ -659,6 +659,26 @@ show_conso_cost:   true    # Coût réseau du jour
 ```
 
 > 🔢 **3 façons (cumulables) d'afficher l'énergie du jour** d'une zone : **pop-up** au clic (`details_on_click`), **bloc** thématique en bas (Conso / Batterie / Routeurs), et **infos secondaires** sur la scène (`show_scene_secondary`, mode single). En mode single, les sous-lignes des chips affichent alors : Réseau → `↓import ↑injection`, Maison → conso, Batterie → `↑charge ↓décharge`, Spa → énergie du jour.
+
+### Navigation au clic (`nav_<zone>`)
+
+Par défaut, cliquer une zone de la scène ouvre le panneau de détails interne. Vous pouvez, **zone par zone**, rediriger ce clic vers une vue de votre dashboard — pratique pour renvoyer vers une page dédiée (graphiques Energy, historique, réglages de l'onduleur…).
+
+Option **YAML uniquement** (pas encore d'équivalent dans l'éditeur visuel) :
+
+```yaml
+nav_pv:      /lovelace/solaire     # Clic sur le badge PV → vue "solaire"
+nav_grid:    /lovelace/reseau
+nav_home:    /lovelace/maison
+nav_battery: /lovelace/batterie
+nav_ev:      /lovelace/voiture
+nav_router1: /lovelace/routeurs    # idem nav_router2, nav_router3, nav_router4
+```
+
+- Zones disponibles : `pv`, `grid`, `home`, `battery`, `ev`, `router1` → `router4`.
+- **Option absente → comportement inchangé** : le panneau de détails s'ouvre normalement. Vous pouvez donc n'en définir qu'une ou deux.
+- La valeur est un chemin de dashboard (ex. `/lovelace/0`, `/lovelace-maison/energie`).
+- ⚠️ Nécessite `details_on_click: true` (valeur par défaut) : si les détails au clic sont désactivés, la navigation l'est aussi.
 
 ### Ordre des sections
 
