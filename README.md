@@ -721,6 +721,21 @@ scene_hide_labels: [node_battery]  # masque le titre de certains encarts (ici «
 - `bars` : chaque barre vaut 20 %. Vert en charge, orange en décharge, rouge sous 20 %, bleu au repos ; la barre du haut clignote pendant la charge. Le pourcentage s'affiche sous la jauge, placée par `scene_layout.battery_gauge`.
 - `scene_hide_labels` prend les clés de traduction des titres : `node_battery`, `node_grid`, `node_home`…
 
+### Une image par saison (scène single)
+
+```yaml
+img_scene_seasons:
+  winter: { day: /local/scenes/maison_hiver_jour.png, night: /local/scenes/maison_hiver_nuit.png }
+  spring: { day: /local/scenes/maison_printemps_jour.png, night: /local/scenes/maison_printemps_nuit.png }
+  summer: { day: /local/scenes/maison_ete_jour.png, night: /local/scenes/maison_ete_nuit.png }
+  autumn: { day: /local/scenes/maison_automne_jour.png, night: /local/scenes/maison_automne_nuit.png }
+scene_season_entity: sensor.season   # optionnel : intégration Season (winter/spring/summer/autumn)
+# scene_season: winter               # optionnel : force une saison (essais)
+```
+
+- Sans `scene_season_entity`, la saison suit le mois : hiver déc-fév, printemps mars-mai, été juin-août, automne sept-nov (décalée de 6 mois si `latitude` < 0).
+- Une saison absente de la liste, ou une image `night` absente, reprend les images habituelles (`img_scene_day` / `img_scene_night` et variantes). Toutes les images doivent avoir **le même cadrage** : les flux et les encarts ne bougent pas.
+
 ### Ordre des sections
 
 Réorganisez l'ordre d'affichage des blocs sous la scène depuis l'éditeur (section **🔃 Ordre des sections**, boutons ▲ / ▼) ou en YAML via `section_order` :

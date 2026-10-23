@@ -5361,6 +5361,26 @@ class SolarFlowCard extends HTMLElement {
     return stops[stops.length - 1][1].join(',');
   }
 
+  // Image de la scène selon la saison (img_scene_seasons: { winter|spring|summer|autumn: { day, night } }).
+  // Saison retenue : scene_season (forcée), sinon l'état de scene_season_entity (intégration Season),
+  // sinon le mois : hiver déc-fév, printemps mars-mai, été juin-août, automne sept-nov
+  // (décalé de 6 mois si latitude < 0). Saison absente de la liste → images habituelles.
+  _seasonImages() {
+    const c = this._cfg || {};
+    const map = c.img_scene_seasons;
+    if (!map || typeof map !== 'object') return null;
+    const names = ['winter', 'spring', 'summer', 'autumn'];
+    let s = String(c.scene_season || '').toLowerCase();
+    if (!names.includes(s) && c.scene_season_entity) s = String(this._getState(c.scene_season_entity) || '').toLowerCase();
+    if (!names.includes(s)) {
+      let i = Math.floor(((new Date().getMonth() + 1) % 12) / 3);   // déc-fév 0 · mars-mai 1 · juin-août 2 · sept-nov 3
+      if (Number(c.latitude) < 0) i = (i + 2) % 4;
+      s = names[i];
+    }
+    const e = map[s];
+    return e && typeof e === 'object' ? e : null;
+  }
+
   // Coin haut-gauche du cylindre de la jauge batterie (scene_layout.battery_gauge)
   _gaugeOrigin() {
     const g = sceneLayout(this._cfg).battery_gauge;
@@ -7119,8 +7139,9 @@ class SolarFlowCard extends HTMLElement {
     const sceneImg = this._el('sfcSceneImg');
     if (sceneImg) {
       const variantKey = (c.img_scene_variant || 'esc_ev').replace(/^esc_/, '');
-      const dayImg = c[`img_scene_day_${variantKey}`] || c.img_scene_day;
-      const nightImg = c[`img_scene_night_${variantKey}`] || c.img_scene_night;
+      const seasonImg = this._seasonImages();
+      const dayImg = (seasonImg && seasonImg.day) || c[`img_scene_day_${variantKey}`] || c.img_scene_day;
+      const nightImg = (seasonImg && seasonImg.night) || c[`img_scene_night_${variantKey}`] || c.img_scene_night;
       const sceneSrc = isNight ? (nightImg || dayImg) : (dayImg || nightImg);
       if (sceneSrc) {
         sceneImg.src = sceneSrc;

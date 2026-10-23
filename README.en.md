@@ -717,6 +717,21 @@ scene_hide_labels: [node_battery]  # hides the title of some badges (here "BATTE
 - `bars`: each bar is 20 %. Green while charging, orange while discharging, red below 20 %, blue when idle; the top bar blinks while charging. The percentage is shown under the gauge, placed by `scene_layout.battery_gauge`.
 - `scene_hide_labels` takes the translation keys of the titles: `node_battery`, `node_grid`, `node_home`…
 
+### One picture per season (single scene)
+
+```yaml
+img_scene_seasons:
+  winter: { day: /local/scenes/house_winter_day.png, night: /local/scenes/house_winter_night.png }
+  spring: { day: /local/scenes/house_spring_day.png, night: /local/scenes/house_spring_night.png }
+  summer: { day: /local/scenes/house_summer_day.png, night: /local/scenes/house_summer_night.png }
+  autumn: { day: /local/scenes/house_autumn_day.png, night: /local/scenes/house_autumn_night.png }
+scene_season_entity: sensor.season   # optional: Season integration (winter/spring/summer/autumn)
+# scene_season: winter               # optional: force a season (testing)
+```
+
+- Without `scene_season_entity`, the season follows the month: winter Dec-Feb, spring Mar-May, summer Jun-Aug, autumn Sep-Nov (shifted by 6 months when `latitude` < 0).
+- A season missing from the list, or a missing `night` picture, falls back to the usual pictures (`img_scene_day` / `img_scene_night` and variants). All pictures must share **the same framing**: flows and badges do not move.
+
 ### Section order
 
 Reorder how the blocks under the scene are displayed, from the editor (**🔃 Sections order** section, ▲ / ▼ buttons) or in YAML via `section_order`:
