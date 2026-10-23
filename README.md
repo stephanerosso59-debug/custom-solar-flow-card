@@ -708,6 +708,19 @@ router3_hide_power: true  # optionnel : n'affiche que la température (appareil 
 - En scène single, seuls `router1` et `router2` ont un badge, à une position fixe. Le badge libre du routeur 3 n'est dessiné **que si `router3_x` ou `router3_y` est défini** : les configurations existantes ne changent pas.
 - Le badge Routeur 3 est cliquable (`details_on_click`, `nav_router3`) et dessiné au-dessus du badge Maison s'ils se chevauchent.
 
+### Style des encarts et de la batterie (scène single)
+
+Trois options **YAML** pour mieux fondre les informations dans une image de fond. **Option absente → rendu inchangé.**
+
+```yaml
+scene_badge_style: fade            # encarts sans cadre : fond sombre qui s'estompe vers les bords, texte détouré
+battery_gauge_style: bars          # jauge batterie en 5 barres façon voyant (au lieu du cylindre liquide)
+scene_hide_labels: [node_battery]  # masque le titre de certains encarts (ici « BATTERIE », la jauge suffit)
+```
+
+- `bars` : chaque barre vaut 20 %. Vert en charge, orange en décharge, rouge sous 20 %, bleu au repos ; la barre du haut clignote pendant la charge. Le pourcentage s'affiche sous la jauge, placée par `scene_layout.battery_gauge`.
+- `scene_hide_labels` prend les clés de traduction des titres : `node_battery`, `node_grid`, `node_home`…
+
 ### Ordre des sections
 
 Réorganisez l'ordre d'affichage des blocs sous la scène depuis l'éditeur (section **🔃 Ordre des sections**, boutons ▲ / ▼) ou en YAML via `section_order` :

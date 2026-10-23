@@ -704,6 +704,19 @@ router3_hide_power: true  # optional: show the temperature only (device that doe
 - In the single scene, only `router1` and `router2` have a badge, at a fixed position. The free Router 3 badge is drawn **only if `router3_x` or `router3_y` is set**, so existing configurations do not change.
 - The Router 3 badge is clickable (`details_on_click`, `nav_router3`) and drawn above the Home badge when they overlap.
 
+### Badge and battery style (single scene)
+
+Three **YAML** options to blend the information into a background picture. **Option not set → unchanged rendering.**
+
+```yaml
+scene_badge_style: fade            # frameless badges: dark background fading out towards the edges, outlined text
+battery_gauge_style: bars          # battery gauge as 5 indicator bars (instead of the liquid cylinder)
+scene_hide_labels: [node_battery]  # hides the title of some badges (here "BATTERY", the gauge is enough)
+```
+
+- `bars`: each bar is 20 %. Green while charging, orange while discharging, red below 20 %, blue when idle; the top bar blinks while charging. The percentage is shown under the gauge, placed by `scene_layout.battery_gauge`.
+- `scene_hide_labels` takes the translation keys of the titles: `node_battery`, `node_grid`, `node_home`…
+
 ### Section order
 
 Reorder how the blocks under the scene are displayed, from the editor (**🔃 Sections order** section, ▲ / ▼ buttons) or in YAML via `section_order`:
