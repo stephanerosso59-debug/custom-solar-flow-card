@@ -4723,6 +4723,50 @@ class SolarFlowCard extends HTMLElement {
     this._attachDetail();
     this._initSceneRenderer();
     this._initCalibration();
+    this._applyBadgeStyle();
+    // scene_hide_labels: [node_battery, ...] → masque ces titres d'encarts (la jauge suffit)
+    const hide = (this._cfg || {}).scene_hide_labels;
+    if (Array.isArray(hide) && hide.length) {
+      const svg = this._el('sfcSingleFlowSvg');
+      const lbls = hide.map(k => t(this._cfg, k).toUpperCase());
+      if (svg) svg.querySelectorAll('text').forEach(x => { if (lbls.includes(x.textContent.trim())) x.style.display = 'none'; });
+    }
+  }
+
+
+  // Style des encarts de la scène (scene_badge_style: fade) : fond sombre qui s'estompe vers
+  // les bords, sans cadre, et texte détouré pour rester lisible sur l'image. Défaut : inchangé.
+  _applyBadgeStyle() {
+    const c = this._cfg || {};
+    if (c.scene_badge_style !== 'fade') return;
+    const svg = this._el('sfcSingleFlowSvg');
+    if (!svg) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    if (!svg.querySelector('#sfcBadgeFade')) {
+      let defs = svg.querySelector('defs');
+      if (!defs) { defs = document.createElementNS(NS, 'defs'); svg.insertBefore(defs, svg.firstChild); }
+      const g = document.createElementNS(NS, 'radialGradient');
+      g.setAttribute('id', 'sfcBadgeFade');
+      [['0%', 0.62], ['55%', 0.45], ['100%', 0]].forEach(([o, a]) => {
+        const s = document.createElementNS(NS, 'stop');
+        s.setAttribute('offset', o); s.setAttribute('stop-color', 'rgb(6,13,26)'); s.setAttribute('stop-opacity', String(a));
+        g.appendChild(s);
+      });
+      defs.appendChild(g);
+    }
+    // Les encarts ont rx="9" (la jauge batterie a rx="6" : elle n'est pas touchée)
+    svg.querySelectorAll('rect[rx="9"]').forEach(r => {
+      if ((r.getAttribute('fill') || '').startsWith('rgba(6,13,26')) {
+        r.setAttribute('fill', 'url(#sfcBadgeFade)');
+        r.setAttribute('stroke', 'none');
+      }
+    });
+    svg.querySelectorAll('text').forEach(t => {
+      t.style.paintOrder = 'stroke';
+      t.setAttribute('stroke', 'rgba(0,0,0,0.55)');
+      t.setAttribute('stroke-width', '5');
+      t.setAttribute('stroke-linejoin', 'round');
+    });
   }
 
   // ────────────────────────────────────────────────────────
@@ -5385,8 +5429,51 @@ class SolarFlowCard extends HTMLElement {
          :                           '0,220,255';
   }
 
+  // Jauge batterie en barres façon voyant (battery_gauge_style: bars) : 5 segments de 20 %,
+  // vert en charge, orange en décharge, rouge sous 20 %, bleu au repos ; le segment du haut
+  // clignote en charge. Le cylindre liquide d'origine est masqué. Défaut : cylindre inchangé.
+  _drawBattBars(battSoc, state) {
+    const svg = this._el('sfcSingleFlowSvg');
+    const bg = this._gaugeOrigin();
+    if (!svg || !bg) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    let g = svg.querySelector('#sfcBattBars');
+    if (!g) {
+      // masque le cylindre d'origine (liquide, vagues, reflets, bulles, texte)
+      ['sfcSVBattFill', 'sfcSVWaveA', 'sfcSVWaveB', 'sfcSVWaveC', 'sfcSVBattWave1', 'sfcSVBattWave2', 'sfcSVBattSoc']
+        .forEach(id => { const e = this._el(id); if (e) e.style.display = 'none'; });
+      svg.querySelectorAll('rect').forEach(r => {
+        const x = +r.getAttribute('x'), y = +r.getAttribute('y'), w = +r.getAttribute('width');
+        if ((x === bg[0] && y === bg[1] && w === 75) || (x === bg[0] + 2 && y === bg[1] + 2 && w === 14)) r.style.display = 'none';
+      });
+      (this._svgBubbles || []).forEach(b => { b.style.display = 'none'; });
+      g = document.createElementNS(NS, 'g');
+      g.setAttribute('id', 'sfcBattBars');
+      const st = document.createElementNS(NS, 'style');
+      st.textContent = '.sfcBarBlink{animation:sfcBarBlink 1.1s ease-in-out infinite}@keyframes sfcBarBlink{50%{opacity:.3}}';
+      g.appendChild(st);
+      const mk = (tag, a) => { const e = document.createElementNS(NS, tag); Object.entries(a).forEach(([k, v]) => e.setAttribute(k, v)); g.appendChild(e); return e; };
+      mk('rect', { x: bg[0] + 25, y: bg[1] - 9, width: 25, height: 10, rx: 3, fill: 'rgba(255,255,255,0.55)' });
+      mk('rect', { x: bg[0], y: bg[1], width: 75, height: 115, rx: 9, fill: 'rgba(6,13,26,0.78)', stroke: 'rgba(255,255,255,0.55)', 'stroke-width': 3 });
+      this._battBarSegs = [0, 1, 2, 3, 4].map(i => mk('rect', {
+        x: bg[0] + 8, y: bg[1] + 105 - (i + 1) * 15 - i * 5, width: 59, height: 15, rx: 3, fill: 'rgba(255,255,255,0.08)' }));
+      this._battBarTxt = mk('text', { x: bg[0] + 37, y: bg[1] + 148, 'text-anchor': 'middle',
+        style: 'font-family:monospace;font-size:38px;font-weight:900;fill:#fff;paint-order:stroke fill;stroke:rgba(0,0,0,0.85);stroke-width:6' });
+      svg.appendChild(g);
+    }
+    const soc = Math.max(0, Math.min(100, Number(battSoc) || 0));
+    const lit = Math.ceil(soc / 20);
+    const col = soc < 20 ? '#ff4b4b' : state === 'charging' ? '#69ff47' : state === 'discharging' ? '#ffa040' : '#4fc3f7';
+    this._battBarSegs.forEach((r, i) => {
+      r.setAttribute('fill', i < lit ? col : 'rgba(255,255,255,0.08)');
+      r.setAttribute('class', (i === lit - 1 && state === 'charging') ? 'sfcBarBlink' : '');
+    });
+    this._battBarTxt.textContent = Math.round(soc) + '%';
+  }
+
   // Anime la batterie mode single (SVG) : niveau élastique, couleur selon %, pulse/clignotement, bulles.
   _updateBatterySVGGSAP(battSoc, state) {
+    if ((this._cfg || {}).battery_gauge_style === 'bars') { this._drawBattBars(battSoc, state); return; }
     if (!window.gsap) return;
     if (!this._battSVGAnimReady) { this._initBatterySVGAnimation(); if (!this._battSVGAnimReady) return; }
 
