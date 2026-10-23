@@ -1,0 +1,7264 @@
+/**
+ * ╔══════════════════════════════════════════════════════════╗
+ * ║          SOLAR FLOW CARD — Home Assistant                ║
+ * ║    Custom Lovelace Card                                  ║
+ * ║    Inspiré de Lumina Energy Card                         ║
+ * ║    Arc solaire · Météo · Flux animés · Temps réel        ║
+ * ╚══════════════════════════════════════════════════════════╝
+ */
+
+// ── Version — modifier uniquement ici ──────────────────────
+const VERSION = '1.5.0-maison';
+
+// ══════════════════════════════════════════════════════════
+//  SOMMAIRE / TABLE OF CONTENTS   (Ctrl-F le libellé « //  NOM »)
+// ──────────────────────────────────────────────────────────
+//  CONFIG & i18n
+//    DEFAULTS ................. valeurs par défaut de la config
+//    I18N ..................... traductions FR / EN + helper t()
+//  HELPERS PURS (sans état, réutilisables)
+//    ASTRONOMY ................ position du soleil, lever / coucher
+//    WEATHER .................. mapping des conditions météo
+//    MOON ..................... phases de lune
+//    SKY GRADIENT ............. dégradé du ciel selon l'élévation
+//  RENDU (génération du DOM)
+//    CSS ...................... styles de la carte (CARD_CSS)
+//    CARD HTML TEMPLATE ....... buildCardHTML() — scène + sections
+//    EDITOR HTML .............. buildEditorHTML() + helpers ed* (edSection, edEntity…)
+//  COMPOSANTS (Web Components)
+//    SOLAR FLOW CARD ELEMENT .. classe principale <solar-flow-card>
+//    EDITOR ................... classe éditeur de configuration
+//    REGISTER ................. customElements.define + window.customCards
+// ══════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════
+//  DEFAULTS
+// ══════════════════════════════════════════════════════════
+const DEFAULTS = {
+  language: 'fr',
+  // Vides par défaut → la carte utilise automatiquement la localisation de la
+  // maison Home Assistant (hass.config). Renseigner pour forcer d'autres coordonnées.
+  latitude: '',
+  // ── Routeurs solaires (jusqu'à 3) ──
+  // Chaque routeur a : image, label, entité puissance, entité énergie journalière
+  router1_enabled:      false,
+  router1_img:          '',
+  router1_label:        'Spa',
+  // Mode 'power' : entité HA retournant les watts directement
+  // Mode 'calc'  : puissance calculée = router1_resistance_w × (router1_opening / 100)
+  //                utile pour les routeurs F1ATB qui exposent une ouverture en %
+  router1_mode:         'power',
+  router1_power:        '',   // sensor.xxx → watts (mode 'power')
+  router1_resistance_w: 0,    // puissance nominale de la résistance en W (mode 'calc')
+  router1_opening:      '',   // sensor.xxx → % ouverture 0-100 (mode 'calc')
+  router1_energy:       '',   // sensor.xxx → kWh aujourd'hui
+  router1_energy_month: '',   // sensor.xxx → kWh ce mois (section Routeurs)
+  router1_energy_year:  '',   // sensor.xxx → kWh cette année
+  router1_energy_total: '',   // sensor.xxx → kWh total (cumul)
+  router1_temp:         '',   // sensor.xxx → °C (température eau, spa...)
+  router1_position:     'right',
+  router1_color:        '#FFA040',  // couleur du flux néon + valeur
+
+  router2_enabled:      false,
+  router2_img:          '',
+  router2_label:        'Chauffe-eau',
+  router2_mode:         'power',
+  router2_power:        '',
+  router2_resistance_w: 0,
+  router2_opening:      '',
+  router2_energy:       '',
+  router2_energy_month: '',
+  router2_energy_year:  '',
+  router2_energy_total: '',
+  router2_position:     'left',
+  router2_color:        '#FFA040',
+
+  router3_enabled:      false,
+  router3_img:          '',
+  router3_label:        'Routeur 3',
+  router3_mode:         'power',
+  router3_power:        '',
+  router3_resistance_w: 0,
+  router3_opening:      '',
+  router3_energy:       '',
+  router3_energy_month: '',
+  router3_energy_year:  '',
+  router3_energy_total: '',
+  router3_position:     'center',
+  router3_color:        '#FFA040',
+
+  router4_enabled:      false,
+  router4_img:          '',
+  router4_label:        'Routeur 4',
+  router4_mode:         'power',
+  router4_power:        '',
+  router4_resistance_w: 0,
+  router4_opening:      '',
+  router4_energy:       '',
+  router4_energy_month: '',
+  router4_energy_year:  '',
+  router4_energy_total: '',
+  router4_position:     'center',
+  router4_color:        '#FFA040',
+
+  // Affichage des routeurs dans la scène MODE SÉPARÉ :
+  // 'spread' = un nœud par routeur (réparti, défaut) | 'sum' = un seul nœud additionné
+  router_scene_mode:    'spread',
+
+  // Images personnalisées (chemin relatif à /local/ ou URL complète)
+  img_house:   '/hacsfiles/custom-solar-flow-card/img/house.png',
+  img_battery: '/hacsfiles/custom-solar-flow-card/img/battery.png',
+  img_grid:    '/hacsfiles/custom-solar-flow-card/img/grid.png',
+  img_scene_mode:    'single',
+  img_scene_variant: 'esc_ev',
+  img_scene_day:     '/hacsfiles/custom-solar-flow-card/img/house-grid.png',
+  img_scene_night:   '/hacsfiles/custom-solar-flow-card/img/house-night.png',
+  img_scene_day_ev:  '/hacsfiles/custom-solar-flow-card/img/house-grid.png?v=1',
+  img_scene_night_ev:'/hacsfiles/custom-solar-flow-card/img/house-night.png?v=1',
+  img_scene_day_spa: '/hacsfiles/custom-solar-flow-card/img/house-spa.png',
+  img_scene_night_spa:'/hacsfiles/custom-solar-flow-card/img/house-spa-night.png',
+  // Overlays optionnels (laisser vide pour masquer)
+  img_overlay1: '',
+  img_overlay1_label: '',
+  img_overlay2: '',
+  img_overlay2_label: '',
+  show_images: true,
+  scene_full_width: false,   // true = la scène single remplit toute la largeur (plein écran)
+  // ── Ciel & météo « canvas » (mode single uniquement) ──
+  // true  = rendu procédural canvas (dégradé aube/crépuscule continu, nuages au vent,
+  //         pluie/neige/grêle/brouillard/éclairs) dans la zone transparente de l'image.
+  // false = ancien rendu CSS (dégradé par paliers + nuages/pluie CSS).
+  sky_canvas:  true,
+  sky_quality: 'medium',     // 'low' | 'medium' | 'high' — densité des particules (pluie/neige/étoiles)
+  longitude: '',
+  pv_max_watts: 2500,
+  batt_capacity_kwh: 2.4,
+  pwr_kva: 0,             // puissance souscrite (kVA) — pour le mode 'calc' de la barre PWR
+  pwr_mode: 'direct',     // 'direct' (entité pwr_percent) | 'calc' (réseau ÷ kVA)
+  refresh_ms: 5000,
+  // Entités (vide = non affiché)
+  pv_power: '',
+  pv_today: '',
+  pv_total: '',
+  batt_soc: '',
+  batt_bar_mode: 'soc',        // 'soc' (SOC %) | 'power' (puissance ÷ limite)
+  batt_charge_limit: '',       // entité OU nombre : limite puissance charge (W) — ex. Zendure chargeMaxLimit
+  batt_discharge_limit: '',    // entité OU nombre : limite puissance décharge (W)
+  batt_voltage: '',
+  batt_power_invert: false,   // true = inverse le signe de batt_power (si l'entité fait + = décharge)
+  batt_mode: '',
+  batt_temp: '',
+  batt_power: '',
+  batt_chg_today: '',
+  batt_dis_today: '',
+  endurance_entity: '',   // entité temps restant directe (ex. Zendure remaining_time) — prioritaire
+  endurance_unit:   'h',  // unité de l'entité : 'h' (heures) | 'min' (minutes)
+  min_cell: '',
+  max_cell: '',
+  remaining: '',
+  // ── Bilan & Performance (note de l'installation) ──
+  show_balance:     true,
+  // Notification persistante quotidienne du bilan énergétique (résumé jour) — activable
+  // librement par le gestionnaire du dashboard. Nécessite que la carte soit affichée
+  // (onglet/tablette ouverte) à l'heure programmée pour se déclencher.
+  notif_balance_enabled: false,
+  notif_balance_time:    '23:59',   // heure de déclenchement HH:MM
+  // ── État de santé batterie (SOH) ──
+  show_health:      true,
+  batt_soh:         '',   // entité SOH % directe (prioritaire si fournie)
+  batt_full_kwh:    '',   // entité capacité actuelle à 100% (kWh) → SOH = full / batt_capacity_kwh
+  batt_cycles:      '',   // entité nombre de cycles direct (prioritaire si fournie)
+  batt_cycles_energy: '', // entité énergie déchargée cumulée (kWh) → EFC = énergie / capacité
+  batt_cycles_base:   0,  // offset de cycles initial (théorique) ajouté à l'EFC calculé
+  batt_cycles_max:    0,  // nombre de cycles max constructeur (0 = masqué) → affiche "N / max"
+  grid_power: '',
+  home_power: '',
+  pwr_percent: '',
+  weather: '',
+  ext_temp: '',
+  sun_elevation: '',
+  sun_azimuth: '',
+  sun_rise: '',
+  sun_set: '',
+  moon_phase: '',
+  today_load: '',
+  // Clic sur une zone → panneau récap des entités liées (construit depuis la config)
+  details_on_click: true,
+  // Couleurs
+  color_solar: '#FFD700',
+  color_grid: '#4FC3F7',
+  color_battery: '#69FF47',
+  color_home: '#FF6B6B',
+  color_ev: '#4FC3F7',
+  color_bg: '#060d1a',
+  // Options
+  show_cells: true,
+  show_endurance: true,
+  show_inverter: true,
+  show_progress_bars: true,
+  show_bms_temp: true,
+  show_total_pv: true,
+  show_mode: true,
+  show_autoconso: true,   // taux d'autoconsommation / autoproduction
+  // Visibilité fine des tuiles du bloc Conso / Réseau (éviter les doublons avec la scène)
+  show_conso_home:   true,   // Maison instantanée (déjà dans la scène → désactivable)
+  show_conso_grid:   true,   // Réseau instantané (déjà dans la scène → désactivable)
+  show_conso_day:    true,   // Conso du jour
+  show_conso_import: true,   // Import du jour
+  show_conso_export: true,   // Injection du jour
+  show_conso_net:    true,   // Bilan net réseau du jour
+  show_conso_cost:   true,   // Coût réseau du jour
+  // Mode single : afficher l'énergie du jour en sous-ligne sur les chips de la scène
+  // (Réseau : import/export · Maison : conso · Batterie : charge/décharge · Spa/routeurs : énergie).
+  // Indépendant du pop-up (details_on_click) et des blocs du bas → cumulable.
+  show_scene_secondary: false,
+  // Ordre d'affichage des sections sous la scène (réordonnable via l'éditeur)
+  section_order: ['bars','pv','conso','balance','battery','health','routers','savings','ev'],
+  // Titres personnalisés des sections (vide = libellé par défaut, ou aucun en-tête
+  // pour les sections qui n'en ont pas : barres, métriques, cellules, autonomie)
+  title_bars:      '',
+  title_pv:        '',
+  title_conso:     '',
+  title_balance:   '',
+  title_battery:   '',
+  title_health:    '',
+  title_savings:   '',
+  title_routers:   '',
+  title_ev:        '',
+  title: 'Solar Flow',
+  // ── Échelles d'affichage (curseurs) ──
+  scale_flux:  1.0,   // épaisseur des flux d'énergie (0.5–2)
+  scale_label: 1.0,   // taille des libellés (RÉSEAU, MAISON…) (0.6–1.8)
+  scale_value: 1.0,   // taille des valeurs chiffrées (0.6–1.8)
+  // ── Économies & Tarification ──
+  show_savings:      true,
+  // Source des montants d'économies : 'calc' = calcul interne (kWh × prix, défaut) ;
+  // 'entity' = capteurs € pré-calculés dans HA (voir docs/CAPTEURS-ECONOMIES.md)
+  savings_mode:        'calc',
+  savings_day_entity:  '',    // €  économies du jour
+  savings_month_entity:'',    // €  économies du mois
+  savings_year_entity: '',    // €  économies de l'année
+  savings_total_entity:'',    // €  économies totales (cumul) — utilisé pour le ROI
+  price_mode:        'fixed', // 'fixed' | 'hphc' | 'tempo' | 'entity'
+  electricity_price: 0.23,    // €/kWh fixe
+  hp_price:          0.27,    // €/kWh heures pleines (mode hphc)
+  hc_price:          0.20,    // €/kWh heures creuses (mode hphc)
+  hc_start:          22,      // heure de début des HC (0-23)
+  hc_end:            6,       // heure de fin des HC (0-23)
+  price_entity:      '',      // sensor.prix_kwh (mode entity)
+  tempo_color:       '',      // sensor.rte_tempo_color (mode tempo)
+  tempo_color_tomorrow: '',   // entité couleur Tempo de DEMAIN (optionnel ; sinon auto via attribut tomorrow/next_color)
+  tempo_blue_hc:     0.1296,
+  tempo_blue_hp:     0.1609,
+  tempo_white_hc:    0.1470,
+  tempo_white_hp:    0.1894,
+  tempo_red_hc:      0.1568,
+  tempo_red_hp:      0.7562,
+  pv_month_kwh:      '',      // sensor.pv_energie_mois
+  pv_year_kwh:       '',      // sensor.pv_energie_annee
+  grid_export_today: '',      // sensor.energie_injectee (affine autoconso)
+  grid_import_today: '',      // sensor.energie_soutiree → bloc Conso (import réseau du jour, kWh)
+  grid_import_month: '',      // import réseau ce mois (kWh) — sous-ligne bloc Conso
+  grid_import_year:  '',      // import réseau cette année (kWh)
+  home_month_kwh:    '',      // conso maison ce mois (kWh) — sous-ligne bloc Conso
+  home_year_kwh:     '',      // conso maison cette année (kWh)
+  export_paid:       false,   // l'export est-il rémunéré (revente) ?
+  export_price:      0.10,    // €/kWh prix de revente du surplus
+  grid_export_month: '',      // sensor export ce mois (revenu mensuel)
+  grid_export_year:  '',      // sensor export cette année (revenu annuel + ROI)
+  install_cost:      0,       // € coût PV / panneaux (0 = ROI masqué)
+  install_date:      '',      // date de mise en service (YYYY-MM-DD) — affichée comme départ du ROI
+  batt_cost:         0,       // € coût batterie (ajouté au coût PV pour le ROI global)
+  batt_savings_kwh:  '',      // entité énergie déchargée cumulée batterie (kWh) ; vide → réutilise batt_cycles_energy
+  batt_savings_price:'',      // €/kWh valorisation de la décharge batterie (arbitrage) ; vide → prix courant
+  co2_factor:        0.4,     // kg CO₂/kWh évités
+  // ── Prévision de production ──
+  pv_forecast_today:    '',   // sensor.xxx → kWh prévus aujourd'hui
+  pv_forecast_tomorrow: '',   // sensor.xxx → kWh prévus demain (optionnel)
+  // ── Véhicule électrique (EV) ──
+  ev_enabled:  false,
+  ev_label:    'Voiture',
+  ev_power:    '',   // W — positif = charge, négatif = V2H (Vehicle-to-Home)
+  ev_soc:      '',   // % SOC du véhicule (optionnel)
+  ev_max_kwh:  0,    // kWh capacité batterie EV (optionnel, pour affichage)
+};
+
+// ══════════════════════════════════════════════════════════
+//  I18N — Traductions FR / EN
+// ══════════════════════════════════════════════════════════
+const I18N = {
+  fr: {
+    // Header
+    status_idle:       'VEILLE',
+    status_producing:  'PRODUCTION',
+    status_charging:   'CHARGE',
+    status_discharge:  'DÉCHARGE',
+    // Flow nodes
+    node_grid:    'Réseau',
+    node_home:    'Maison',
+    node_battery: 'Batterie',
+    dir_import:   '↓ Import',
+    dir_export:   '↑ Export',
+    // Metric cards
+    lbl_mode:     'Mode',
+    lbl_bms_temp: 'Temp. BMS',
+    lbl_total_pv: 'Total PV',
+    lbl_co2_today:'CO₂ évité',
+    lbl_min_cell: 'Cell. min',
+    lbl_max_cell: 'Cell. max',
+    lbl_batt_chg: 'Charge',
+    lbl_batt_dis: 'Décharge',
+    lbl_endurance:'Autonomie',
+    // Mode values
+    mode_charge:    'Charge',
+    mode_discharge: 'Décharge',
+    mode_idle:      'Veille',
+    // Tempo + HC/HP + unité jour
+    tempo_blue:  'BLEU',
+    tempo_white: 'BLANC',
+    tempo_red:   'ROUGE',
+    lbl_hc:      'HC',
+    lbl_hp:      'HP',
+    unit_day:    'j',
+    // Section
+    section_inverter: 'Onduleur',
+    // Inverter cards
+    inv_today_pv:   'PV du jour',
+    inv_chg_dis:    'Chg / Dch',
+    inv_remaining:  'Restant',
+    inv_today_load: 'Conso. jour',
+    // Sun labels
+    sun_rise: '🌅',
+    sun_set:  '🌇',
+    // Editor
+    ed_title:         'Solar Flow Card — Configuration',
+    ed_general:       '⚙️ Général',
+    ed_pv:            '☀️ Production PV',
+    ed_multi_entity_info: "🔗 <b>Plusieurs onduleurs / batteries ?</b> Sépare les entités par des <b>virgules</b> dans un même champ → elles sont <b>additionnées</b> (ex. <i>sensor.pv1_total, sensor.pv2_total</i>). ⚠️ Sauf le <b>SOC (%)</b> : garde une seule entité (ou une moyenne via un capteur template).",
+    ed_batt:          '🔋 Batterie',
+    ed_grid:          '🏗️ Réseau & Maison',
+    ed_meteo:         '⛅ Météo & Soleil',
+    ed_colors:        '🎨 Couleurs',
+    ed_display:       '👁️ Affichage',
+    ed_card_title:    'Titre de la carte',
+    ed_lat:           'Latitude',
+    ed_lon:           'Longitude',
+    ed_pv_max:        'PV max (W)',
+    ed_pv_max_desc:   'Puissance crête installée',
+    ed_batt_cap:      'Capacité batterie (kWh)',
+    ed_pwr_kva:       'Puissance souscrite (kVA)',
+    ed_pwr_mode:      'Source barre PWR',
+    ed_pwr_mode_direct:'Valeur directe (entité %)',
+    ed_pwr_mode_calc: 'Calculée (réseau ÷ kVA)',
+    ed_language:      'Langue',
+    ed_pv_power:      'Puissance PV (W)',
+    ed_pv_today:      "PV aujourd'hui (kWh)",
+    ed_pv_total:      'PV total (kWh)',
+    ed_batt_soc:      'SOC (%)',
+    ed_batt_bar_mode:      'Source barre BAT',
+    ed_batt_bar_soc:       'État de charge (SOC %)',
+    ed_batt_bar_power:     'Puissance ÷ limite (charge/décharge)',
+    ed_batt_charge_limit:  'Limite puissance charge (W ou entité)',
+    ed_batt_discharge_limit:'Limite puissance décharge (W ou entité)',
+    ed_batt_voltage:  'Tension (V)',
+    ed_batt_mode:     'Mode batterie (capteur 0/1 ou select de stratégie : couplage intelligent, charge/décharge forcée…)',
+    ed_batt_temp:     'Température BMS (°C)',
+    ed_batt_power:    'Puissance charge / décharge batterie (W)',
+    ed_batt_power_invert: 'Inverser le signe (si + = décharge)',
+    ed_batt_chg:      'Charge auj. (kWh)',
+    ed_batt_dis:      'Décharge auj. (kWh)',
+    ed_min_cell:      'Tension min cellule (V)',
+    ed_max_cell:      'Tension max cellule (V)',
+    ed_remaining:     'Énergie restante (kWh)',
+    ed_endurance_entity:  'Entité temps restant (autonomie)',
+    ed_endurance_unit:    'Unité du temps restant',
+    ed_endurance_unit_h:  'Heures',
+    ed_endurance_unit_min:'Minutes',
+    ed_grid_power:    'Puissance réseau (W)',
+    ed_home_power:    'Consommation maison (W)',
+    ed_pwr_pct:       'Puissance sortie (%)',
+    ed_today_load:    'Conso. maison auj. (kWh)',
+    ed_weather:       'Entité météo (weather.*)',
+    ed_ext_temp:      'Température extérieure',
+    ed_sun_elev:      'Élévation solaire',
+    ed_sun_az:        'Azimut solaire',
+    ed_sun_rise:      'Heure lever',
+    ed_sun_set:       'Heure coucher',
+    ed_sun_info:      '💡 Les entités soleil sont <strong>optionnelles</strong> — si absentes, la position est calculée depuis les coordonnées GPS. Le lever/coucher utilise automatiquement <strong>sun.sun</strong> (intégration Soleil) s\'il existe, sinon les entités ci-dessous, sinon le calcul interne.',
+    ed_col_solar:     'Couleur solaire',
+    ed_col_grid:      'Couleur réseau',
+    ed_col_batt:      'Couleur batterie',
+    ed_col_home:      'Couleur maison',
+    ed_col_ev:        'Couleur flux voiture (EV)',
+    ed_col_bg:        'Couleur fond',
+    ed_show_bars:     'Barres de progression',
+    ed_show_mode:     'Mode batterie',
+    ed_show_bms:      'Température BMS',
+    ed_show_total_pv: 'CO₂ évité (jour)',
+    ed_show_cells:    'Tensions cellules',
+    ed_show_endurance:'Autonomie batterie',
+    ed_show_inverter: 'Section Onduleur',
+    ed_show_savings:  'Bloc Économies',
+    ed_details_on_click: 'Clic sur une zone → détails',
+    det_pv:      'Production solaire',
+    det_grid:    'Réseau',
+    det_home:    'Maison',
+    det_battery: 'Batterie',
+    det_ev:      'Véhicule électrique',
+    ed_section_order:      '🔃 Ordre des sections',
+    ed_section_order_info: 'Réorganisez l\'ordre d\'affichage des sections sous l\'image avec ▲ / ▼.',
+    ed_section_titles:     '🏷️ Titres des sections',
+    ed_section_titles_info:'Personnalisez le titre de chaque section (vide = libellé par défaut).',
+    sec_bars:      'Barres de progression',
+    sec_metrics:   'Mode / BMS / CO₂',
+    sec_cells:     'Tensions cellules',
+    sec_endurance: 'Autonomie',
+    sec_inverter:  'Onduleur',
+    sec_autoconso: 'Autoconsommation',
+    sec_health:    'État de santé',
+    sec_savings:   'Économies & ROI',
+    sec_pv:        'PV / Solaire',
+    sec_conso:     'Conso / Réseau',
+    sec_balance:   'Bilan & Performance',
+    sec_battery:   'Batterie',
+    sec_routers:   'Routeurs (énergie)',
+    sec_ev:        'Véhicule électrique',
+    section_pv:      'PV / Solaire',
+    section_conso:   'Conso / Réseau',
+    section_balance: 'Bilan & Performance',
+    bal_production:   'Production',
+    bal_consumption:  'Consommation',
+    bal_autonomy:     'Autonomie',
+    bal_self:         'Autoconsommée',
+    bal_stored:       'stockée',
+    bal_injected:     'Injectée',
+    bal_solar:        'Solaire directe',
+    bal_battery:      'Batterie',
+    bal_grid:         'Réseau',
+    bal_note:         'Note',
+    bal_q_excellent:  'Excellent',
+    bal_q_verygood:   'Très bon',
+    bal_q_good:       'Bon',
+    bal_q_average:    'Moyen',
+    bal_q_low:        'À optimiser',
+    bal_hint:         'Note = moyenne autoconso. + autonomie',
+    section_battery: 'Batterie',
+    section_routers: 'Routeurs',
+    section_ev:      'Véhicule électrique',
+    lbl_injection:   'Injection',
+    lbl_import:      'Import',
+    lbl_net_grid:    'Bilan réseau',
+    lbl_grid_cost:   'Coût réseau',
+    ev_st_charge:    'Charge',
+    ev_st_v2h:       'V2H (décharge)',
+    ev_st_idle:      'Repos',
+    lbl_ev_power:    'Puissance',
+    lbl_ev_soc:      'SOC',
+    lbl_ev_batt:     'Batterie',
+    lbl_ev_state:    'État',
+    rt_day:          'Jour',
+    rt_month:        'Mois',
+    rt_year:         'Année',
+    rt_total:        'Total',
+    ed_router_energy_month: 'Entité énergie mois (kWh)',
+    ed_router_energy_year:  'Entité énergie année (kWh)',
+    ed_router_energy_total: 'Entité énergie totale (kWh)',
+    ed_appearance:    '🔎 Tailles d\'affichage',
+    ed_scale_flux:    'Épaisseur des flux',
+    ed_scale_label:   'Taille des libellés',
+    ed_scale_value:   'Taille des valeurs',
+    // EV
+    ed_forecast:          '🔮 Prévision de production',
+    ed_forecast_today:    "Prévision aujourd'hui (kWh)",
+    ed_forecast_tomorrow: 'Prévision demain (kWh)',
+    ed_ev:          '🚗 Véhicule électrique (EV)',
+    ed_ev_label:    'Nom du véhicule',
+    ed_ev_power:    'Puissance charge/V2H (W)',
+    ed_ev_soc:      'SOC batterie EV (%)',
+    ed_ev_max_kwh:  'Capacité batterie EV (kWh)',
+    // Autoconsommation
+    section_autoconso: 'Autoconsommation',
+    lbl_selfconso:     'Autoconso.',
+    lbl_selfprod:      'Autonomie',
+    ed_show_autoconso: 'Bloc autoconsommation',
+    // Santé batterie
+    section_health:    'État de santé batterie',
+    lbl_soh:           'SOH',
+    lbl_capacity:      'Capacité',
+    lbl_cycles:        'Cycles',
+    ed_health:         '🩺 État de santé batterie',
+    ed_show_health:    'Bloc état de santé',
+    ed_show_balance:   'Bloc Bilan & Performance',
+    ed_notif_balance:         '🔔 Notification bilan quotidien',
+    ed_notif_balance_enabled: 'Notification persistante activée',
+    ed_notif_balance_time:    'Heure d\'envoi',
+    ed_notif_balance_info:    '💡 Envoie une notification persistante Home Assistant avec le bilan énergétique du jour, à l\'heure choisie. Nécessite que cette carte soit affichée dans un navigateur à ce moment-là (ex. tablette murale).',
+    notif_balance_line_pv:      'Production PV',
+    notif_balance_line_conso:   'Consommation',
+    notif_balance_line_import:  'Import réseau',
+    notif_balance_line_export:  'Injection réseau',
+    notif_balance_line_batt:    'Charge / Décharge batterie',
+    ed_show_scene_secondary: 'Infos énergie sur la scène (mode single)',
+    ed_batt_soh:       'Méthode A — Entité SOH (%) directe',
+    ed_batt_full:      'Méthode B — Entité capacité totale réelle (kWh)',
+    ed_batt_cycles:    'Entité cycles directe (si dispo)',
+    ed_batt_cycles_energy: 'Entité énergie déchargée cumulée (kWh)',
+    ed_batt_cycles_base:   'Cycles de base (offset initial)',
+    ed_batt_cycles_max:    'Cycles max constructeur (ex. 6000)',
+    // Savings block
+    section_savings:   'Économies & ROI',
+    sav_today:         "Aujourd'hui",
+    sav_month:         'Ce mois',
+    sav_year:          'Cette année',
+    sav_roi:           'ROI',
+    sav_roi_years:     'ans',
+    // Editor savings
+    ed_savings:         '🔌Économies & Tarification',
+    ed_savings_mode:        'Source des économies',
+    ed_savings_mode_calc:   '🧮 Calcul interne (kWh × prix)',
+    ed_savings_mode_entity: '🔗 Capteurs € (calculés dans HA)',
+    ed_savings_entity_info: "💡 Affiche directement des capteurs € calculés dans Home Assistant (plus précis : tient compte de la variation tarifaire au moment exact de la conso). Voir le guide docs/CAPTEURS-ECONOMIES.md. Le tarif ci-dessous ne sert alors qu'au badge prix/Tempo.",
+    ed_savings_day_entity:   'Économies du jour (€)',
+    ed_savings_month_entity: 'Économies du mois (€)',
+    ed_savings_year_entity:  "Économies de l'année (€)",
+    ed_savings_total_entity: 'Économies totales (€) — pour le ROI',
+    ed_price_mode:        'Mode de tarification',
+    ed_price_mode_fixed:  '💶 Prix fixe',
+    ed_price_mode_hphc:   '🕐 Heures Pleines / Creuses',
+    ed_price_mode_tempo:  '🌈 Tempo EDF',
+    ed_price_mode_entity: '🔗 Entité dynamique',
+    ed_tempo_price_entity:'Entité prix dynamique (optionnel)',
+    ed_hp_price:          'Prix Heures Pleines (€/kWh)',
+    ed_hc_price:          'Prix Heures Creuses (€/kWh)',
+    ed_hc_start:          'Début HC (heure 0-23)',
+    ed_hc_end:            'Fin HC (heure 0-23)',
+    ed_elec_price:      'Prix fixe (€/kWh)',
+    ed_price_entity:    'Entité prix dynamique',
+    ed_tempo_color:     'Entité couleur Tempo',
+    ed_tempo_color_tomorrow: 'Entité couleur Tempo — demain (optionnel)',
+    tempo_tomorrow_lbl: 'Demain',
+    ed_tempo_prices:    'Prix Tempo (€/kWh) — HC / HP',
+    ed_pv_month:        'PV ce mois (entité kWh)',
+    ed_pv_year:         'PV cette année (entité kWh)',
+    ed_grid_export:     "Export réseau auj. (entité kWh)",
+    ed_grid_import:     "Import réseau auj. (entité kWh) — bloc Conso",
+    ed_grid_import_month: "Import réseau ce mois (kWh)",
+    ed_grid_import_year:  "Import réseau cette année (kWh)",
+    ed_home_month:      "Conso maison ce mois (kWh)",
+    ed_home_year:       "Conso maison cette année (kWh)",
+    ed_conso_vis:       'Affichage du bloc Conso (anti-doublon scène)',
+    ed_show_conso_home:   'Maison (instantané)',
+    ed_show_conso_grid:   'Réseau (instantané)',
+    ed_show_conso_day:    'Conso du jour',
+    ed_show_conso_import: 'Import',
+    ed_show_conso_export: 'Injection',
+    ed_show_conso_net:    'Bilan net réseau',
+    ed_show_conso_cost:   'Coût réseau du jour',
+    ed_export_paid:     "Export rémunéré (revente du surplus)",
+    ed_export_price:    "Prix de revente (€/kWh)",
+    ed_export_month:    "Export ce mois (entité kWh)",
+    ed_export_year:     "Export cette année (entité kWh)",
+    ed_install_cost:    "Coût PV / panneaux (€)",
+    ed_install_date:    "Date de mise en service",
+    ed_batt_cost:       "Coût batterie (€)",
+    ed_batt_savings_kwh:   "Entité énergie déchargée cumulée batterie (kWh)",
+    ed_batt_savings_price: "Valorisation décharge batterie (€/kWh)",
+    ed_roi_info:        "💡 <b>Comment le ROI est calculé</b><br>• <b>Coût total</b> = <i>Coût PV / panneaux</i> + <i>Coût batterie</i> (ci-dessus).<br>• <b>Économies cumulées</b> = <i>PV total</i> × bénéfice moyen/kWh (+ économies batterie).<br>&nbsp;&nbsp;↳ <i>PV total</i> (kWh depuis le début) vient de la section <b>☀️ Production PV</b>.<br>&nbsp;&nbsp;↳ bénéfice moyen/kWh = économies de l'année ÷ <i>PV cette année</i> (mix autoconso/revente).<br>• <b>Barre</b> = cumulé ÷ coût total ; <b>texte</b> = années restantes, puis « Amorti ✓ + gain net ».<br>• Sans <i>PV total</i> → projection théorique : coût total ÷ bénéfice annuel.<br>• En mode « Capteurs € » → ROI = <i>Économies totales</i> ÷ coût total.<br>📅 <b>Temps restant fiable</b> : renseigne la <i>Date de mise en service</i> → le rythme annuel = cumul ÷ âge (cohérent avec le Total, et insensible à un capteur « année » partiel/créé en cours d'année). Sinon, rythme = capteur « cette année » annualisé.<br>🔗 <b>Multi-installations</b> : sépare plusieurs entités par des <b>virgules</b> dans un même champ → elles sont <b>additionnées</b> (ex. 3 onduleurs dans <i>PV total</i>).",
+    ed_batt_roi_info:   "🔋 <b>Batterie dans le ROI</b><br>• Le <i>Coût batterie</i> s'ajoute au coût PV → ROI global.<br>• Économies batterie = énergie déchargée cumulée × <i>Valorisation</i>.<br>&nbsp;&nbsp;↳ entité vide → réutilise « énergie déchargée cumulée » de la section <b>🩺 État de santé</b>.<br>&nbsp;&nbsp;↳ rythme annuel estimé via <i>Décharge auj.</i> de la section <b>🔋 Batterie</b>.<br>🔗 Plusieurs batteries → liste les entités séparées par des <b>virgules</b> (additionnées).<br>⚠️ Ne renseignez la <i>Valorisation</i> QUE si la batterie fait de l'arbitrage (charge réseau en heures creuses) — sinon l'énergie solaire est déjà comptée côté PV (double comptage).",
+    sav_battery:        'Batterie',
+    ed_co2_factor:      'Facteur CO₂ (kg/kWh)',
+    ed_apply:         '💾 Appliquer les modifications',
+    ed_saved:         '✓ Configuration sauvegardée',
+    ed_saved_note:    'Appuyez sur Appliquer après chaque modification.',
+    ed_reset:         '↺ Réinitialiser',
+    // Images
+    ed_images:             '🖼️ Images',
+    ed_show_images:        'Affichage avec images',
+    ed_images_info:        '📁 Placez vos images dans <strong>/config/www/solar-flow-card/img/</strong>',
+    ed_img_house:          'Maison (house.png)',
+    ed_img_battery:        'Batterie (battery.png)',
+    ed_img_grid:           'Réseau (grid.png)',
+    ed_img_scene_mode:      'Mode scène',
+    ed_img_scene_mode_separate: 'Séparé (grid / house / battery)',
+    ed_img_scene_mode_single: 'Unique (jour/nuit)',
+    ed_scene_full_width:    'Pleine largeur (plein écran)',
+    ed_sky_canvas:          'Ciel & météo « canvas » (procédural)',
+    ed_sky_quality:         'Qualité des effets météo',
+    ed_sky_quality_low:     'Basse',
+    ed_sky_quality_medium:  'Moyenne',
+    ed_sky_quality_high:    'Haute',
+    ed_img_scene_variant:   'Variante scène',
+    ed_img_scene_variant_ev:'ESC + EV',
+    ed_img_scene_variant_spa:'ESC + SPA',
+    ed_img_scene_day:       'Scène jour (générique)',
+    ed_img_scene_night:     'Scène nuit (générique)',
+    ed_img_scene_day_ev:    'Scène jour ESC + EV',
+    ed_img_scene_night_ev:  'Scène nuit ESC + EV',
+    ed_img_scene_day_spa:   'Scène jour ESC + SPA',
+    ed_img_scene_night_spa: 'Scène nuit ESC + SPA',
+    ed_img_overlay1:       'Overlay 1 — chemin image',
+    ed_img_overlay1_label: 'Overlay 1 — label',
+    ed_img_overlay2:       'Overlay 2 — chemin image',
+    ed_img_overlay2_label: 'Overlay 2 — label',
+    // Routeurs
+    ed_routers:         '⚡ Routeurs solaires',
+    ed_routers_info:    '💡 Affichez les équipements pilotés par routeur solaire (spa, chauffe-eau...) avec leur flux temps réel.',
+    ed_router:          'Routeur',
+    ed_router_enabled:  'Activer',
+    ed_router_label:    'Nom affiché',
+    ed_router_img:      'Image (chemin)',
+    ed_router_power:    'Entité puissance (W)',
+    ed_router_energy:   'Entité énergie jour (kWh)',
+    ed_router_temp:     'Température eau (°C) — mode single',
+    ed_router_mode:       'Mode de mesure',
+    ed_router_mode_power: 'Puissance directe (entité W)',
+    ed_router_mode_calc:  'Calcul — résistance × ouverture %',
+    ed_router_resistance: 'Puissance résistance (W)',
+    ed_router_opening:    'Entité ouverture % (ex: sensor.f1atb_opening)',
+    ed_router_pos:        'Position dans la scène',
+    ed_router_color:      'Couleur du flux',
+    ed_router_scene_mode:   'Affichage routeurs (scène mode séparé)',
+    ed_router_scene_spread: 'Répartis — un par routeur',
+    ed_router_scene_sum:    'Additionné — un seul bloc',
+    ed_pos_left:          'Gauche',
+    ed_pos_center:        'Centre',
+    ed_pos_right:         'Droite',
+  },
+  en: {
+    // Header
+    status_idle:       'IDLE',
+    status_producing:  'PRODUCING',
+    status_charging:   'CHARGING',
+    status_discharge:  'DISCHARGE',
+    // Flow nodes
+    node_grid:    'Grid',
+    node_home:    'Home',
+    node_battery: 'Battery',
+    dir_import:   '↓ Import',
+    dir_export:   '↑ Export',
+    // Metric cards
+    lbl_mode:     'Mode',
+    lbl_bms_temp: 'BMS Temp',
+    lbl_total_pv: 'Total PV',
+    lbl_co2_today:'CO₂ saved',
+    lbl_min_cell: 'Min Cell',
+    lbl_max_cell: 'Max Cell',
+    lbl_batt_chg: 'Charge',
+    lbl_batt_dis: 'Batt Dis.',
+    lbl_endurance:'Endurance',
+    // Mode values
+    mode_charge:    'Charge',
+    mode_discharge: 'Discharge',
+    mode_idle:      'Idle',
+    // Tempo + peak/off-peak + day unit
+    tempo_blue:  'BLUE',
+    tempo_white: 'WHITE',
+    tempo_red:   'RED',
+    lbl_hc:      'OP',
+    lbl_hp:      'PK',
+    unit_day:    'd',
+    // Section
+    section_inverter: 'Inverter',
+    // Inverter cards
+    inv_today_pv:   'Today PV',
+    inv_chg_dis:    'CHG / DIS',
+    inv_remaining:  'Remaining',
+    inv_today_load: 'Today Load',
+    // Sun labels
+    sun_rise: '🌅',
+    sun_set:  '🌇',
+    // Editor
+    ed_title:         'Solar Flow Card — Configuration',
+    ed_general:       '⚙️ General',
+    ed_pv:            '☀️ PV Production',
+    ed_multi_entity_info: "🔗 <b>Multiple inverters / batteries?</b> Separate entities with <b>commas</b> in one field → they are <b>summed</b> (e.g. <i>sensor.pv1_total, sensor.pv2_total</i>). ⚠️ Except <b>SOC (%)</b>: keep a single entity (or an average via a template sensor).",
+    ed_batt:          '🔋 Battery',
+    ed_grid:          '🏗️ Grid & Home',
+    ed_meteo:         '⛅ Weather & Sun',
+    ed_colors:        '🎨 Colors',
+    ed_display:       '👁️ Display',
+    ed_card_title:    'Card title',
+    ed_lat:           'Latitude',
+    ed_lon:           'Longitude',
+    ed_pv_max:        'PV max (W)',
+    ed_pv_max_desc:   'Peak installed power',
+    ed_batt_cap:      'Battery capacity (kWh)',
+    ed_pwr_kva:       'Subscribed power (kVA)',
+    ed_pwr_mode:      'PWR bar source',
+    ed_pwr_mode_direct:'Direct value (% entity)',
+    ed_pwr_mode_calc: 'Calculated (grid ÷ kVA)',
+    ed_language:      'Language',
+    ed_pv_power:      'PV power (W)',
+    ed_pv_today:      'PV today (kWh)',
+    ed_pv_total:      'PV total (kWh)',
+    ed_batt_soc:      'SOC (%)',
+    ed_batt_bar_mode:      'BAT bar source',
+    ed_batt_bar_soc:       'State of charge (SOC %)',
+    ed_batt_bar_power:     'Power ÷ limit (charge/discharge)',
+    ed_batt_charge_limit:  'Charge power limit (W or entity)',
+    ed_batt_discharge_limit:'Discharge power limit (W or entity)',
+    ed_batt_voltage:  'Voltage (V)',
+    ed_batt_mode:     'Battery mode (0/1 sensor or strategy select: smart matching, forced charge/discharge…)',
+    ed_batt_temp:     'BMS temperature (°C)',
+    ed_batt_power:    'Battery charge / discharge power (W)',
+    ed_batt_power_invert: 'Invert sign (if + = discharge)',
+    ed_batt_chg:      'Charge today (kWh)',
+    ed_batt_dis:      'Discharge today (kWh)',
+    ed_min_cell:      'Min cell voltage (V)',
+    ed_max_cell:      'Max cell voltage (V)',
+    ed_remaining:     'Remaining energy (kWh)',
+    ed_endurance_entity:  'Remaining time entity (autonomy)',
+    ed_endurance_unit:    'Remaining time unit',
+    ed_endurance_unit_h:  'Hours',
+    ed_endurance_unit_min:'Minutes',
+    ed_grid_power:    'Grid power (W)',
+    ed_home_power:    'Home consumption (W)',
+    ed_pwr_pct:       'Output pack power (%)',
+    ed_today_load:    'Home load today (kWh)',
+    ed_weather:       'Weather entity (weather.*)',
+    ed_ext_temp:      'Outside temperature',
+    ed_sun_elev:      'Sun elevation',
+    ed_sun_az:        'Sun azimuth',
+    ed_sun_rise:      'Sunrise time',
+    ed_sun_set:       'Sunset time',
+    ed_sun_info:      '💡 Sun entities are <strong>optional</strong> — if absent, position is calculated from GPS coordinates. Sunrise/sunset automatically uses <strong>sun.sun</strong> (Sun integration) if present, otherwise the entities below, otherwise the internal calculation.',
+    ed_col_solar:     'Solar color',
+    ed_col_grid:      'Grid color',
+    ed_col_batt:      'Battery color',
+    ed_col_home:      'Home color',
+    ed_col_ev:        'EV flow color',
+    ed_col_bg:        'Background color',
+    ed_show_bars:     'Progress bars',
+    ed_show_mode:     'Battery mode',
+    ed_show_bms:      'BMS temperature',
+    ed_show_total_pv: 'CO₂ saved (today)',
+    ed_show_cells:    'Cell voltages',
+    ed_show_endurance:'Battery endurance',
+    ed_show_inverter: 'Inverter section',
+    ed_show_savings:  'Savings block',
+    ed_details_on_click: 'Click a zone → details',
+    det_pv:      'Solar production',
+    det_grid:    'Grid',
+    det_home:    'Home',
+    det_battery: 'Battery',
+    det_ev:      'Electric vehicle',
+    ed_section_order:      '🔃 Sections order',
+    ed_section_order_info: 'Reorder how sections are displayed under the image with ▲ / ▼.',
+    ed_section_titles:     '🏷️ Section titles',
+    ed_section_titles_info:'Customize each section title (empty = default label).',
+    sec_bars:      'Progress bars',
+    sec_metrics:   'Mode / BMS / CO₂',
+    sec_cells:     'Cell voltages',
+    sec_endurance: 'Endurance',
+    sec_inverter:  'Inverter',
+    sec_autoconso: 'Self-consumption',
+    sec_health:    'Battery health',
+    sec_savings:   'Savings & ROI',
+    sec_pv:        'PV / Solar',
+    sec_conso:     'Consumption / Grid',
+    sec_balance:   'Balance & Performance',
+    sec_battery:   'Battery',
+    sec_routers:   'Routers (energy)',
+    sec_ev:        'Electric vehicle',
+    section_pv:      'PV / Solar',
+    section_conso:   'Consumption / Grid',
+    section_balance: 'Balance & Performance',
+    bal_production:   'Production',
+    bal_consumption:  'Consumption',
+    bal_autonomy:     'Self-suff.',
+    bal_self:         'Self-used',
+    bal_stored:       'stored',
+    bal_injected:     'Exported',
+    bal_solar:        'Direct solar',
+    bal_battery:      'Battery',
+    bal_grid:         'Grid',
+    bal_note:         'Grade',
+    bal_q_excellent:  'Excellent',
+    bal_q_verygood:   'Very good',
+    bal_q_good:       'Good',
+    bal_q_average:    'Average',
+    bal_q_low:        'To improve',
+    bal_hint:         'Grade = average of self-cons. + self-suff.',
+    section_battery: 'Battery',
+    section_routers: 'Routers',
+    section_ev:      'Electric vehicle',
+    lbl_injection:   'Export',
+    lbl_import:      'Import',
+    lbl_net_grid:    'Grid balance',
+    lbl_grid_cost:   'Grid cost',
+    ev_st_charge:    'Charging',
+    ev_st_v2h:       'V2H (discharge)',
+    ev_st_idle:      'Idle',
+    lbl_ev_power:    'Power',
+    lbl_ev_soc:      'SOC',
+    lbl_ev_batt:     'Battery',
+    lbl_ev_state:    'State',
+    rt_day:          'Day',
+    rt_month:        'Month',
+    rt_year:         'Year',
+    rt_total:        'Total',
+    ed_router_energy_month: 'Monthly energy entity (kWh)',
+    ed_router_energy_year:  'Yearly energy entity (kWh)',
+    ed_router_energy_total: 'Total energy entity (kWh)',
+    ed_appearance:    '🔎 Display sizes',
+    ed_scale_flux:    'Flow thickness',
+    ed_scale_label:   'Label size',
+    ed_scale_value:   'Value size',
+    ed_forecast:          '🔮 Production forecast',
+    ed_forecast_today:    'Forecast today (kWh)',
+    ed_forecast_tomorrow: 'Forecast tomorrow (kWh)',
+    ed_ev:          '🚗 Electric Vehicle (EV)',
+    ed_ev_label:    'Vehicle name',
+    ed_ev_power:    'Charge/V2H power (W)',
+    ed_ev_soc:      'EV battery SOC (%)',
+    ed_ev_max_kwh:  'EV battery capacity (kWh)',
+    section_autoconso: 'Self-consumption',
+    lbl_selfconso:     'Self-cons.',
+    lbl_selfprod:      'Self-suff.',
+    ed_show_autoconso: 'Self-consumption block',
+    section_health:    'Battery health',
+    lbl_soh:           'SOH',
+    lbl_capacity:      'Capacity',
+    lbl_cycles:        'Cycles',
+    ed_health:         '🩺 Battery health',
+    ed_show_health:    'Health block',
+    ed_show_balance:   'Balance & Performance block',
+    ed_notif_balance:         '🔔 Daily balance notification',
+    ed_notif_balance_enabled: 'Persistent notification enabled',
+    ed_notif_balance_time:    'Send time',
+    ed_notif_balance_info:    '💡 Sends a Home Assistant persistent notification with the daily energy balance, at the chosen time. Requires this card to be displayed in a browser at that moment (e.g. wall tablet).',
+    notif_balance_line_pv:      'PV production',
+    notif_balance_line_conso:   'Consumption',
+    notif_balance_line_import:  'Grid import',
+    notif_balance_line_export:  'Grid export',
+    notif_balance_line_batt:    'Battery charge / discharge',
+    ed_show_scene_secondary: 'Energy info on the scene (single mode)',
+    ed_batt_soh:       'Method A — Direct SOH entity (%)',
+    ed_batt_full:      'Method B — Real total capacity entity (kWh)',
+    ed_batt_cycles:    'Direct cycle entity (if available)',
+    ed_batt_cycles_energy: 'Cumulative discharged energy entity (kWh)',
+    ed_batt_cycles_base:   'Base cycles (initial offset)',
+    ed_batt_cycles_max:    'Rated max cycles (e.g. 6000)',
+    section_savings:   'Savings & ROI',
+    sav_today:         'Today',
+    sav_month:         'This month',
+    sav_year:          'This year',
+    sav_roi:           'ROI',
+    sav_roi_years:     'yrs',
+    ed_savings:        '🔌 Savings & Pricing',
+    ed_savings_mode:        'Savings source',
+    ed_savings_mode_calc:   '🧮 Internal calc (kWh × price)',
+    ed_savings_mode_entity: '🔗 € sensors (computed in HA)',
+    ed_savings_entity_info: '💡 Directly display € sensors computed in Home Assistant (more accurate: respects tariff variation at the exact moment of consumption). See docs/SAVINGS-SENSORS.md. The tariff below then only drives the price/Tempo badge.',
+    ed_savings_day_entity:   'Daily savings (€)',
+    ed_savings_month_entity: 'Monthly savings (€)',
+    ed_savings_year_entity:  'Yearly savings (€)',
+    ed_savings_total_entity: 'Total savings (€) — for ROI',
+    ed_price_mode:        'Pricing mode',
+    ed_price_mode_fixed:  '💶 Fixed price',
+    ed_price_mode_hphc:   '🕐 Peak / Off-peak',
+    ed_price_mode_tempo:  '🌈 EDF Tempo',
+    ed_price_mode_entity: '🔗 Dynamic entity',
+    ed_tempo_price_entity:'Dynamic price entity (optional)',
+    ed_hp_price:          'Peak price (€/kWh)',
+    ed_hc_price:          'Off-peak price (€/kWh)',
+    ed_hc_start:          'Off-peak start (hour 0-23)',
+    ed_hc_end:            'Off-peak end (hour 0-23)',
+    ed_elec_price:     'Fixed price (€/kWh)',
+    ed_price_entity:   'Dynamic price entity',
+    ed_tempo_color:    'Tempo color entity',
+    ed_tempo_color_tomorrow: 'Tempo color entity — tomorrow (optional)',
+    tempo_tomorrow_lbl: 'Tomorrow',
+    ed_tempo_prices:   'Tempo prices (€/kWh) — HC / HP',
+    ed_pv_month:       'PV this month (kWh entity)',
+    ed_pv_year:        'PV this year (kWh entity)',
+    ed_grid_export:    'Grid export today (kWh entity)',
+    ed_grid_import:    'Grid import today (kWh entity) — Consumption block',
+    ed_grid_import_month: 'Grid import this month (kWh)',
+    ed_grid_import_year:  'Grid import this year (kWh)',
+    ed_home_month:      'Home consumption this month (kWh)',
+    ed_home_year:       'Home consumption this year (kWh)',
+    ed_conso_vis:       'Consumption block display (avoid scene duplicates)',
+    ed_show_conso_home:   'Home (instant)',
+    ed_show_conso_grid:   'Grid (instant)',
+    ed_show_conso_day:    'Consumption today',
+    ed_show_conso_import: 'Import',
+    ed_show_conso_export: 'Export',
+    ed_show_conso_net:    'Net grid balance',
+    ed_show_conso_cost:   'Daily grid cost',
+    ed_export_paid:    'Export remunerated (sell surplus)',
+    ed_export_price:   'Sell price (€/kWh)',
+    ed_export_month:   'Export this month (kWh entity)',
+    ed_export_year:    'Export this year (kWh entity)',
+    ed_install_cost:   'PV / panels cost (€)',
+    ed_install_date:   'Commissioning date',
+    ed_batt_cost:      'Battery cost (€)',
+    ed_batt_savings_kwh:   'Battery cumulative discharged energy entity (kWh)',
+    ed_batt_savings_price: 'Battery discharge value (€/kWh)',
+    ed_roi_info:       "💡 <b>How the ROI is computed</b><br>• <b>Total cost</b> = <i>PV / panels cost</i> + <i>Battery cost</i> (above).<br>• <b>Cumulative savings</b> = <i>PV total</i> × average benefit/kWh (+ battery savings).<br>&nbsp;&nbsp;↳ <i>PV total</i> (kWh since the start) comes from the <b>☀️ PV Production</b> section.<br>&nbsp;&nbsp;↳ average benefit/kWh = this year's savings ÷ <i>PV this year</i> (self-consumption/sell-back mix).<br>• <b>Bar</b> = cumulative ÷ total cost; <b>text</b> = remaining years, then 'Paid off ✓ + net gain'.<br>• Without <i>PV total</i> → theoretical projection: total cost ÷ annual benefit.<br>• In '€ sensors' mode → ROI = <i>Total savings</i> ÷ total cost.<br>📅 <b>Reliable remaining time</b>: set the <i>Commissioning date</i> → annual rate = cumulative ÷ age (consistent with the Total, immune to a partial/mid-year 'this year' sensor). Otherwise, rate = annualized 'this year' sensor.<br>🔗 <b>Multi-arrays</b>: list several entities separated by <b>commas</b> in one field → they are <b>summed</b> (e.g. 3 inverters in <i>PV total</i>).",
+    ed_batt_roi_info:  "🔋 <b>Battery in the ROI</b><br>• The <i>Battery cost</i> is added to the PV cost → global ROI.<br>• Battery savings = cumulative discharged energy × <i>Value</i>.<br>&nbsp;&nbsp;↳ empty entity → reuses 'cumulative discharged energy' from the <b>🩺 Battery health</b> section.<br>&nbsp;&nbsp;↳ annual pace estimated via <i>Discharge today</i> from the <b>🔋 Battery</b> section.<br>🔗 Multiple batteries → list the entities separated by <b>commas</b> (summed).<br>⚠️ Only set the <i>Value</i> if the battery does arbitrage (off-peak grid charging) — otherwise solar energy is already counted on the PV side (double counting).",
+    sav_battery:       'Battery',
+    ed_co2_factor:     'CO₂ factor (kg/kWh)',
+    ed_apply:         '💾 Apply changes',
+    ed_saved:         '✓ Configuration saved',
+    ed_saved_note:    'Press Apply after each change.',
+    ed_reset:         '↺ Reset',
+    // Images
+    ed_images:             '🖼️ Images',
+    ed_show_images:        'Image display',
+    ed_images_info:        '📁 Place your images in <strong>/config/www/solar-flow-card/img/</strong>',
+    ed_img_house:          'House (house.png)',
+    ed_img_battery:        'Battery (battery.png)',
+    ed_img_grid:           'Grid (grid.png)',
+    ed_img_scene_mode:      'Scene mode',
+    ed_img_scene_mode_separate: 'Separate (grid / house / battery)',
+    ed_img_scene_mode_single: 'Single image (day/night)',
+    ed_scene_full_width:    'Full width (fullscreen)',
+    ed_sky_canvas:          'Canvas sky & weather (procedural)',
+    ed_sky_quality:         'Weather effects quality',
+    ed_sky_quality_low:     'Low',
+    ed_sky_quality_medium:  'Medium',
+    ed_sky_quality_high:    'High',
+    ed_img_scene_variant:   'Scene variant',
+    ed_img_scene_variant_ev:'ESC + EV',
+    ed_img_scene_variant_spa:'ESC + SPA',
+    ed_img_scene_day:       'Scene image - day (generic)',
+    ed_img_scene_night:     'Scene image - night (generic)',
+    ed_img_scene_day_ev:    'Scene image - day ESC + EV',
+    ed_img_scene_night_ev:  'Scene image - night ESC + EV',
+    ed_img_scene_day_spa:   'Scene image - day ESC + SPA',
+    ed_img_scene_night_spa: 'Scene image - night ESC + SPA',
+    ed_img_overlay1:       'Overlay 1 — image path',
+    ed_img_overlay1_label: 'Overlay 1 — label',
+    ed_img_overlay2:       'Overlay 2 — image path',
+    ed_img_overlay2_label: 'Overlay 2 — label',
+    // Routers
+    ed_routers:         '⚡ Solar routers',
+    ed_routers_info:    '💡 Display devices controlled by solar router (spa, water heater...) with real-time flow.',
+    ed_router:          'Router',
+    ed_router_enabled:  'Enable',
+    ed_router_label:    'Display name',
+    ed_router_img:      'Image (path)',
+    ed_router_power:    'Power entity (W)',
+    ed_router_energy:   'Daily energy entity (kWh)',
+    ed_router_temp:     'Water temperature (°C) — single mode',
+    ed_router_mode:       'Measurement mode',
+    ed_router_mode_power: 'Direct power entity (W)',
+    ed_router_mode_calc:  'Calculated — resistance × opening %',
+    ed_router_resistance: 'Resistance power (W)',
+    ed_router_opening:    'Opening entity % (e.g. sensor.f1atb_opening)',
+    ed_router_pos:        'Position in scene',
+    ed_router_color:      'Flow color',
+    ed_router_scene_mode:   'Routers display (separate scene)',
+    ed_router_scene_spread: 'Spread — one per router',
+    ed_router_scene_sum:    'Summed — single block',
+    ed_pos_left:          'Left',
+    ed_pos_center:        'Center',
+    ed_pos_right:         'Right',
+  },
+  vi: {
+    status_idle: 'CHỜ',
+    status_producing: 'SẢN XUẤT',
+    status_charging: 'SẠC',
+    status_discharge: 'XẢ PIN',
+    node_grid: 'Lưới điện',
+    node_home: 'Nhà',
+    node_battery: 'Pin',
+    dir_import: '↓ Nhập',
+    dir_export: '↑ Xuất',
+    lbl_mode: 'Chế độ',
+    lbl_bms_temp: 'Nhiệt độ BMS',
+    lbl_total_pv: 'Tổng PV',
+    lbl_co2_today: 'CO₂ tiết kiệm',
+    lbl_min_cell: 'Cell Min',
+    lbl_max_cell: 'Cell Max',
+    lbl_batt_chg: 'Sạc pin',
+    lbl_batt_dis: 'Xả Pin',
+    lbl_endurance: 'Thời lượng',
+    mode_charge: 'Sạc',
+    mode_discharge: 'Xả',
+    mode_idle: 'Chờ',
+    tempo_blue: 'Giờ Thấp Điểm (Xanh)',
+    tempo_white: 'Giờ Bình Thường (Trắng)',
+    tempo_red: 'Giờ Cao Điểm (Đỏ)',
+    lbl_hc: 'Giờ thấp điểm',
+    lbl_hp: 'Giờ cao điểm',
+    unit_day: 'ngày',
+    section_inverter: 'Biến tần',
+    inv_today_pv: 'PV hôm nay',
+    inv_chg_dis: 'Sạc / Xả',
+    inv_remaining: 'Còn lại',
+    inv_today_load: 'Tiêu thụ HN',
+    sun_rise: '🌅',
+    sun_set: '🌇',
+    ed_title: 'Cấu hình Solar Flow Card',
+    ed_general: '⚙️ Cài đặt chung',
+    ed_pv: '☀️ Sản lượng PV',
+    ed_batt: '🔋 Pin lưu trữ',
+    ed_grid: '🏗️ Lưới điện & Nhà',
+    ed_meteo: '⛅ Thời tiết & Mặt trời',
+    ed_colors: '🎨 Màu sắc',
+    ed_display: '👁️ Hiển thị',
+    ed_card_title: 'Tiêu đề thẻ',
+    ed_lat: 'Vĩ độ',
+    ed_lon: 'Kinh độ',
+    ed_pv_max: 'PV tối đa (W)',
+    ed_pv_max_desc: 'Công suất lắp đặt đỉnh',
+    ed_batt_cap: 'Dung lượng pin (kWh)',
+    ed_pwr_kva: 'Công suất đăng ký (kVA)',
+    ed_pwr_mode: 'Nguồn thanh PWR',
+    ed_pwr_mode_direct: 'Giá trị trực tiếp (thực thể %)',
+    ed_pwr_mode_calc: 'Tính toán (lưới ÷ kVA)',
+    ed_language: 'Ngôn ngữ',
+    ed_pv_power: 'Công suất PV (W)',
+    ed_pv_total: 'Tổng PV (kWh)',
+    ed_batt_soc: 'SOC (%)',
+    ed_batt_bar_mode: 'Nguồn thanh BAT',
+    ed_batt_bar_soc: 'Trạng thái sạc (SOC %)',
+    ed_batt_bar_power: 'Công suất ÷ giới hạn (sạc/xả)',
+    ed_batt_charge_limit: 'Giới hạn công suất sạc (W hoặc thực thể)',
+    ed_batt_discharge_limit: 'Giới hạn công suất xả (W hoặc thực thể)',
+    ed_batt_voltage: 'Điện áp (V)',
+    ed_batt_mode: 'Chế độ pin (Cảm biến 0/1 hoặc chiến lược sạc thông minh)',
+    ed_batt_temp: 'Nhiệt độ BMS (°C)',
+    ed_batt_power: 'Công suất sạc / xả pin (W)',
+    ed_batt_power_invert: 'Đảo ngược dấu (nếu + = xả)',
+    ed_batt_chg: 'Sạc hôm nay (kWh)',
+    ed_batt_dis: 'Xả hôm nay (kWh)',
+    ed_min_cell: 'Điện áp cell Min (V)',
+    ed_max_cell: 'Điện áp cell Max (V)',
+    ed_remaining: 'Năng lượng còn lại (kWh)',
+    ed_endurance_entity: 'Thực thể thời gian tự chủ còn lại',
+    ed_endurance_unit: 'Đơn vị thời gian còn lại',
+    ed_endurance_unit_h: 'Giờ',
+    ed_endurance_unit_min: 'Phút',
+    ed_grid_power: 'Công suất lưới (W)',
+    ed_home_power: 'Tiêu thụ nhà (W)',
+    ed_pwr_pct: 'Công suất đầu ra (%)',
+    ed_today_load: 'Tiêu thụ nhà hôm nay (kWh)',
+    ed_weather: 'Thực thể thời tiết (weather.*)',
+    ed_ext_temp: 'Nhiệt độ ngoài trời',
+    ed_sun_elev: 'Góc cao mặt trời',
+    ed_sun_az: 'Góc phương vị mặt trời',
+    ed_sun_rise: 'Giờ mặt trời mọc',
+    ed_sun_set: 'Giờ mặt trời lặn',
+    ed_sun_info: '💡 Các thực thể mặt trời là <strong>tùy chọn</strong> — nếu không có, vị trí sẽ được tính từ tọa độ GPS.',
+    ed_col_solar: 'Màu năng lượng mặt trời',
+    ed_col_grid: 'Màu lưới điện',
+    ed_col_batt: 'Màu pin',
+    ed_col_home: 'Màu nhà',
+    ed_col_ev: 'Màu xe điện (EV)',
+    ed_col_bg: 'Màu nền',
+    ed_show_bars: 'Thanh tiến trình',
+    ed_show_mode: 'Chế độ pin',
+    ed_show_bms: 'Nhiệt độ BMS',
+    ed_show_total_pv: 'CO₂ tiết kiệm (hôm nay)',
+    ed_show_cells: 'Điện áp các cell',
+    ed_show_endurance: 'Thời lượng pin',
+    ed_show_inverter: 'Phần biến tần',
+    ed_show_savings: 'Khối Tiết kiệm',
+    ed_details_on_click: 'Nhấp vào một vùng → xem chi tiết',
+    det_pv: 'Sản lượng mặt trời',
+    det_grid: 'Lưới điện',
+    det_home: 'Nhà',
+    det_battery: 'Pin',
+    det_ev: 'Xe điện',
+    ed_section_order: '🔃 Thứ tự các phần',
+    ed_section_order_info: 'Sắp xếp lại thứ tự hiển thị của các phần bên dưới hình ảnh bằng ▲ / ▼.',
+    ed_section_titles: '🏷️ Tiêu đề các phần',
+    ed_section_titles_info: 'Tùy chỉnh tiêu đề của từng phần (trống = nhãn mặc định).',
+    sec_bars: 'Thanh tiến trình',
+    sec_metrics: 'Chế độ / BMS / CO₂',
+    sec_cells: 'Điện áp các cell',
+    sec_endurance: 'Thời lượng',
+    sec_inverter: 'Biến tần',
+    sec_autoconso: 'Tự tiêu thụ',
+    sec_health: 'Tình trạng sức khỏe',
+    sec_savings: 'Tiết kiệm & ROI',
+    sec_pv: 'PV / Mặt trời',
+    sec_conso: 'Tiêu thụ / Lưới điện',
+    sec_balance: 'Cân bằng & Hiệu suất',
+    sec_battery: 'Pin',
+    sec_routers: 'Bộ điều hướng năng lượng',
+    sec_ev: 'Xe điện',
+    section_pv: 'PV / Mặt trời',
+    section_conso: 'Tiêu thụ / Lưới điện',
+    section_balance: 'Cân bằng & Hiệu suất',
+    bal_production: 'Sản lượng',
+    bal_consumption: 'Tiêu thụ',
+    bal_autonomy: 'Tự chủ',
+    bal_self: 'Tự tiêu thụ',
+    bal_stored: 'đã lưu trữ',
+    bal_injected: 'Đẩy lưới',
+    bal_solar: 'Mặt trời trực tiếp',
+    bal_battery: 'Pin',
+    bal_grid: 'Lưới điện',
+    bal_note: 'Đánh giá',
+    bal_q_excellent: 'Xuất sắc',
+    bal_q_verygood: 'Rất tốt',
+    bal_q_good: 'Tốt',
+    bal_q_average: 'Trung bình',
+    bal_q_low: 'Cần tối ưu',
+    bal_hint: 'Đánh giá = trung bình cộng tự tiêu thụ + tự chủ',
+    section_battery: 'Pin',
+    section_routers: 'Bộ điều hướng',
+    section_ev: 'Xe điện',
+    lbl_injection: 'Đẩy lưới',
+    lbl_import: 'Nhập lưới',
+    lbl_net_grid: 'Cân bằng lưới',
+    lbl_grid_cost: 'Chi phí lưới điện',
+    ev_st_charge: 'Đang sạc',
+    ev_st_v2h: 'V2H (đang xả)',
+    ev_st_idle: 'Chờ',
+    lbl_ev_power: 'Công suất',
+    lbl_ev_soc: 'SOC',
+    lbl_ev_batt: 'Pin',
+    lbl_ev_state: 'Trạng thái',
+    rt_day: 'Ngày',
+    rt_month: 'Tháng',
+    rt_year: 'Năm',
+    rt_total: 'Tổng',
+    ed_router_energy_month: 'Thực thể năng lượng tháng (kWh)',
+    ed_router_energy_year: 'Thực thể năng lượng năm (kWh)',
+    ed_router_energy_total: 'Thực thể năng lượng tổng (kWh)',
+    ed_appearance: '🔎 Kích thước hiển thị',
+    ed_scale_flux: 'Độ dày đường năng lượng',
+    ed_scale_label: 'Kích thước nhãn',
+    ed_scale_value: 'Kích thước giá trị',
+    ed_forecast: '🔮 Dự báo sản lượng',
+    ed_forecast_tomorrow: 'Dự báo ngày mai (kWh)',
+    ed_ev: '🚗 Xe điện (EV)',
+    ed_ev_label: 'Tên xe',
+    ed_ev_power: 'Công suất sạc/V2H (W)',
+    ed_ev_soc: 'SOC pin EV (%)',
+    ed_ev_max_kwh: 'Dung lượng pin EV (kWh)',
+    section_autoconso: 'Tự tiêu thụ',
+    lbl_selfconso: 'Tự tiêu thụ',
+    lbl_selfprod: 'Tự sản xuất',
+    ed_show_autoconso: 'Khối tự tiêu thụ',
+    section_health: 'Tình trạng sức khỏe pin (SOH)',
+    lbl_soh: 'SOH',
+    lbl_capacity: 'Dung lượng',
+    lbl_cycles: 'Chu kỳ',
+    ed_health: '🩺 Tình trạng sức khỏe pin',
+    ed_show_health: 'Khối tình trạng sức khỏe',
+    ed_show_balance: 'Khối Cân bằng & Hiệu suất',
+    ed_show_scene_secondary: 'Thông tin năng lượng trên giao diện chính (chế độ đơn lẻ)',
+    ed_batt_soh: 'Cách A — Thực thể SOH (%) trực tiếp',
+    ed_batt_full: 'Cách B — Thực thể dung lượng tổng thực tế (kWh)',
+    ed_batt_cycles: 'Thực thể chu kỳ trực tiếp (nếu có)',
+    ed_batt_cycles_energy: 'Thực thể năng lượng xả tích lũy (kWh)',
+    ed_batt_cycles_base: 'Chu kỳ cơ sở (bù đắp ban đầu)',
+    ed_batt_cycles_max: 'Chu kỳ tối đa của nhà sản xuất (VD: 6000)',
+    section_savings: 'Tiết kiệm & Hoàn vốn (ROI)',
+    sav_month: 'Tháng này',
+    sav_year: 'Năm nay',
+    sav_roi: 'Hoàn vốn',
+    sav_roi_years: 'năm',
+    ed_savings: '🔌 Tiết kiệm & Giá điện',
+    ed_savings_mode: 'Nguồn tính tiết kiệm',
+    ed_savings_mode_calc: '🧮 Tính toán nội bộ (kWh × giá)',
+    ed_savings_mode_entity: '🔗 Cảm biến tiền tệ (được tính trong HA)',
+    ed_savings_day_entity: 'Tiết kiệm trong ngày',
+    ed_savings_month_entity: 'Tiết kiệm trong tháng',
+    ed_savings_total_entity: 'Tổng tiết kiệm — để tính ROI',
+    ed_price_mode: 'Chế độ giá điện',
+    ed_price_mode_fixed: '💶 Giá cố định',
+    ed_price_mode_hphc: '🕐 Giờ Cao điểm / Thấp điểm',
+    ed_price_mode_tempo: '🌈 Tempo EDF',
+    ed_price_mode_entity: '🔗 Thực thể động',
+    ed_tempo_price_entity: 'Thực thể giá động (tùy chọn)',
+    ed_hp_price: 'Giá Giờ Cao điểm (€/kWh)',
+    ed_hc_price: 'Giá Giờ Thấp điểm (€/kWh)',
+    ed_hc_start: 'Bắt đầu Giờ Thấp điểm (giờ 0-23)',
+    ed_hc_end: 'Kết thúc Giờ Thấp điểm (giờ 0-23)',
+    ed_elec_price: 'Giá cố định (€/kWh)',
+    ed_price_entity: 'Thực thể giá động',
+    ed_tempo_color: 'Thực thể màu Tempo',
+    ed_tempo_color_tomorrow: 'Thực thể màu Tempo — ngày mai (tùy chọn)',
+    tempo_tomorrow_lbl: 'Ngày mai',
+    ed_tempo_prices: 'Giá Tempo (€/kWh) — Thấp / Cao điểm',
+    ed_pv_month: 'PV tháng này (thực thể kWh)',
+    ed_pv_year: 'PV năm nay (thực thể kWh)',
+    ed_conso_vis: 'Hiển thị khối Tiêu thụ (tránh trùng lặp giao diện)',
+    ed_show_conso_home: 'Nhà (tức thời)',
+    ed_show_conso_grid: 'Lưới điện (tức thời)',
+    ed_show_conso_day: 'Tiêu thụ trong ngày',
+    ed_show_conso_import: 'Nhập lưới',
+    ed_show_conso_export: 'Đẩy lưới',
+    ed_show_conso_net: 'Cân bằng lưới thuần',
+    ed_show_conso_cost: 'Chi phí lưới điện trong ngày',
+    sav_battery: 'Pin',
+    ed_co2_factor: 'Hệ số CO₂ (kg/kWh)',
+    ed_apply: '💾 Áp dụng thay đổi',
+    ed_saved: '✓ Đã lưu cấu hình',
+    ed_saved_note: 'Nhấn Áp dụng sau mỗi khi thay đổi.',
+    ed_reset: '↺ Đặt lại',
+    ed_images: '🖼️ Hình ảnh',
+    ed_show_images: 'Hiển thị hình ảnh',
+    ed_images_info: '📁 Đặt hình ảnh của bạn vào <strong>/config/www/solar-flow-card/img/</strong>',
+    ed_img_house: 'Nhà (house.png)',
+    ed_img_battery: 'Pin (battery.png)',
+    ed_img_grid: 'Lưới điện (grid.png)',
+    ed_img_scene_mode: 'Chế độ ngữ cảnh',
+    ed_img_scene_mode_separate: 'Tách biệt (Lưới / Nhà / Pin)',
+    ed_img_scene_mode_single: 'Ảnh đơn (Ngày/Đêm)',
+    ed_scene_full_width: 'Kích thước đầy đủ (toàn màn hình)',
+    ed_img_scene_variant: 'Biến thể ngữ cảnh',
+    ed_img_scene_variant_ev: 'ESC + EV',
+    ed_img_scene_variant_spa: 'ESC + SPA',
+    ed_img_scene_day: 'Ảnh ban ngày (chung)',
+    ed_img_scene_night: 'Ảnh ban đêm (chung)',
+    ed_img_scene_day_ev: 'Ảnh ban ngày ESC + EV',
+    ed_img_scene_night_ev: 'Ảnh ban đêm ESC + EV',
+    ed_img_scene_day_spa: 'Ảnh ban ngày ESC + SPA',
+    ed_img_scene_night_spa: 'Ảnh ban đêm ESC + SPA',
+    ed_img_overlay1: 'Lớp phủ 1 — đường dẫn ảnh',
+    ed_img_overlay1_label: 'Lớp phủ 1 — nhãn',
+    ed_img_overlay2: 'Lớp phủ 2 — đường dẫn ảnh',
+    ed_img_overlay2_label: 'Lớp phủ 2 — nhãn',
+    ed_routers: '⚡ Bộ điều phối NLMT (Solar routers)',
+    ed_routers_info: '💡 Hiển thị các thiết bị được điều khiển bằng năng lượng mặt trời (spa, bình nóng lạnh...) với dòng điện thời gian thực.',
+    ed_router: 'Bộ điều phối',
+    ed_router_enabled: 'Kích hoạt',
+    ed_router_label: 'Tên hiển thị',
+    ed_router_img: 'Hình ảnh (đường dẫn)',
+    ed_router_power: 'Thực thể công suất (W)',
+    ed_router_energy: 'Thực thể năng lượng trong ngày (kWh)',
+    ed_router_temp: 'Nhiệt độ nước (°C) — chế độ đơn',
+    ed_router_mode: 'Chế độ đo lường',
+    ed_router_mode_power: 'Thực thể công suất trực tiếp (W)',
+    ed_router_mode_calc: 'Tính toán — điện trở × % độ mở',
+    ed_router_resistance: 'Công suất điện trở (W)',
+    ed_router_opening: 'Thực thể độ mở % (VD: sensor.f1atb_opening)',
+    ed_router_pos: 'Vị trí trong ngữ cảnh',
+    ed_router_color: 'Màu sắc dòng chảy',
+    ed_router_scene_mode: 'Hiển thị bộ điều hướng (chế độ giao diện tách biệt)',
+    ed_router_scene_spread: 'Tách riêng — mỗi bộ điều hướng một dòng',
+    ed_router_scene_sum: 'Cộng tổng — gom lại một khối duy nhất',
+    ed_pos_left: 'Trái',
+    ed_pos_center: 'Giữa',
+    ed_pos_right: 'Phải',
+    ed_multi_entity_info: '🔗 <b>Nhiều biến tần / pin?</b> Phân tách các thực thể bằng dấu <b>phẩy</b> trong cùng một trường → chúng sẽ được <b>cộng dồn</b> (ví dụ: <i>sensor.pv1_total, sensor.pv2_total</i>). ⚠️ Ngoại trừ <b>SOC (%)</b>: chỉ giữ một thực thể duy nhất (hoặc lấy trung bình thông qua một cảm biến template).',
+    ed_pv_today: 'PV hôm nay (kWh)',
+    ed_forecast_today: 'Dự báo hôm nay (kWh)',
+    sav_today: 'Hôm nay',
+    ed_savings_entity_info: '💡 Hiển thị trực tiếp các cảm biến tiền tệ được tính toán trong Home Assistant (chính xác hơn: tính đến sự thay đổi giá tại thời điểm tiêu thụ thực tế). Xem hướng dẫn docs/SAVINGS-SENSORS.md. Biểu giá dưới đây khi đó sẽ chỉ dùng cho badge hiển thị giá.',
+    ed_savings_year_entity: 'Tiết kiệm trong năm',
+    ed_grid_export: 'Xuất lưới hôm nay (thực thể kWh)',
+    ed_grid_import: 'Nhập lưới hôm nay (thực thể kWh) — khối Tiêu thụ',
+    ed_grid_import_month: 'Nhập lưới tháng này (kWh)',
+    ed_grid_import_year: 'Nhập lưới năm này (kWh)',
+    ed_home_month: 'Tiêu thụ nhà tháng này (kWh)',
+    ed_home_year: 'Tiêu thụ nhà năm này (kWh)',
+    ed_export_paid: 'Bán điện dư (xuất có tính phí)',
+    ed_export_price: 'Giá bán điện (€/kWh)',
+    ed_export_month: 'Xuất lưới tháng này (thực thể kWh)',
+    ed_export_year: 'Xuất lưới năm nay (thực thể kWh)',
+    ed_install_cost: 'Chi phí lắp đặt (€)',
+    ed_install_date: 'Ngày đưa vào vận hành',
+    ed_batt_cost: 'Chi phí mua pin',
+    ed_batt_savings_kwh: 'Thực thể tổng năng lượng xả lũy kế của pin (kWh)',
+    ed_batt_savings_price: 'Giá trị quy đổi dòng xả pin (VND/kWh)',
+    ed_roi_info: '💡 <b>Cách tính ROI (Thời gian hoàn vốn)</b><br>• <b>Tổng chi phí</b> = <i>Chi phí PV / tấm pin</i> + <i>Chi phí pin</i> (bên trên).<br>• <b>Tiết kiệm lũy kế</b> = <i>Tổng lượng PV</i> × lợi nhuận trung bình/kWh (+ tiết kiệm từ pin).<br>&nbsp;&nbsp;↳ <i>Tổng lượng PV</i> (kWh tính từ lúc bắt đầu) được lấy từ phần <b>☀️ Sản xuất PV</b>.<br>&nbsp;&nbsp;↳ lợi nhuận trung bình/kWh = tiết kiệm trong năm ÷ <i>PV năm nay</i> (tỷ lệ trộn giữa tự tiêu thụ/bán lại).<br>• <b>Thanh tiến trình</b> = lũy kế ÷ tổng chi phí; <b>văn bản</b> = số năm còn lại, sau đó là « Đã hòa vốn ✓ + lãi thuần ».<br>• Nếu không có <i>Tổng lượng PV</i> → dự kiến lý thuyết: tổng chi phí ÷ lợi nhuận hàng năm.<br>• Ở chế độ « Cảm biến tiền tệ » → ROI = <i>Tổng tiết kiệm</i> ÷ tổng chi phí.<br>📅 <b>Thời gian còn lại đáng tin cậy</b>: điền thông tin <i>Ngày đưa vào vận hành</i> → hiệu suất hàng năm = lũy kế ÷ tuổi thọ hệ thống (nhất quán với Tổng số, và không bị ảnh hưởng bởi cảm biến « năm nay » bị thiếu/mới tạo giữa chừng). Nếu không, hiệu suất = cảm biến « năm nay » được quy đổi theo năm.<br>🔗 <b>Hệ thống nhiều giàn pin</b>: phân tách nhiều thực thể bằng dấu <b>phẩy</b> trong cùng một trường → chúng sẽ được <b>cộng dồn</b> (ví dụ: 3 biến tần trong mục <i>Tổng lượng PV</i>).',
+    ed_batt_roi_info: '🔋 <b>Pin lưu trữ trong tính toán ROI</b><br>• <i>Chi phí pin</i> sẽ được cộng vào chi phí PV → tính ROI tổng thể toàn hệ thống.<br>• Tiết kiệm từ pin = năng lượng xả lũy kế × <i>Giá trị quy đổi</i>.<br>&nbsp;&nbsp;↳ nếu để trống thực thể → hệ thống sẽ tự động sử dụng lại « năng lượng xả lũy kế » từ phần <b>🩺 Trạng thái sức khỏe (SOH)</b>.<br>&nbsp;&nbsp;↳ hiệu suất hàng năm ước tính thông qua mục <i>Xả hôm nay</i> trong phần <b>🔋 Pin</b>.<br>🔗 Nhiều khối pin → liệt kê các thực thể phân tách bằng dấu <b>phẩy</b> (sẽ được cộng dồn).<br>⚠️ CHỈ điền giá trị mục <i>Giá trị quy đổi</i> nếu pin của bạn thực hiện sạc/xả kinh tế (ví dụ: sạc lưới giờ thấp điểm rồi xả) — nếu không, năng lượng mặt trời lưu vào pin đã được tính ở phần PV rồi (tránh bị tính trùng hai lần).',
+    ed_notif_balance:          'Thông báo tổng kết hàng ngày',
+    ed_notif_balance_enabled:  'Kích hoạt thông báo liên tục',
+    ed_notif_balance_time:     'Thời gian gửi',
+    ed_notif_balance_info: 'Gửi một thông báo liên tục trên Home Assistant kèm theo bảng tổng kết năng lượng trong ngày vào thời gian đã chọn. Yêu cầu thẻ này phải đang được hiển thị trên một trình duyệt vào thời điểm đó (ví dụ: máy tính bảng treo tường).',
+    notif_balance_line_pv:     'Sản lượng điện mặt trời (PV)',
+    notif_balance_line_conso:  'Điện năng tiêu thụ',
+    notif_balance_line_import: 'Điện lưới nhập vào',
+    notif_balance_line_export: 'Điện lưới phát ra',
+    notif_balance_line_batt:   'Sạc / Xả pin lưu trữ',
+    ed_sky_canvas:             'Hiệu ứng bầu trời & thời tiết (canvas)',
+    ed_sky_quality:            'Chất lượng hiệu ứng thời tiết',
+    ed_sky_quality_low:        'Thấp',
+    ed_sky_quality_medium:     'Trung bình',
+    ed_sky_quality_high:       'Cao',
+  },
+};
+
+// Traduit une clé i18n selon cfg.language (repli sur FR, puis sur la clé brute).
+function t(cfg, key) {
+  const lang = (cfg && cfg.language) || 'fr';
+  const dict = I18N[lang] || I18N['fr'];
+  return dict[key] || I18N['fr'][key] || key;
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  ASTRONOMY
+// ══════════════════════════════════════════════════════════
+// Degrés → radians.
+function deg2rad(d) { return d * Math.PI / 180; }
+// Radians → degrés.
+function rad2deg(r) { return r * 180 / Math.PI; }
+
+// Position du soleil (élévation + azimut, en degrés) pour une date et des coordonnées (algo NOAA).
+function computeSunPosition(date, lat, lon) {
+  const JD = date.getTime() / 86400000 + 2440587.5;
+  const n = JD - 2451545.0;
+  const L = (280.460 + 0.9856474 * n) % 360;
+  const g = deg2rad((357.528 + 0.9856003 * n) % 360);
+  const λ = deg2rad(L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g));
+  const ε = deg2rad(23.439 - 0.0000004 * n);
+  const sinDec = Math.sin(ε) * Math.sin(λ);
+  const dec = Math.asin(sinDec);
+  const UT = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+  const GMST = (6.697375 + 0.0657098242 * n + UT) % 24;
+  const LST = (GMST + lon / 15 + 24) % 24;
+  // Angle horaire du SOLEIL = temps sidéral local − ascension droite du soleil.
+  // (Avant : (LST−12)·15, ce qui confondait temps sidéral et temps solaire → position fausse.)
+  let RAh = rad2deg(Math.atan2(Math.cos(ε) * Math.sin(λ), Math.cos(λ))) / 15;
+  RAh = (RAh + 24) % 24;
+  let HAh = LST - RAh;
+  if (HAh < -12) HAh += 24;
+  if (HAh > 12)  HAh -= 24;
+  const HA = deg2rad(HAh * 15);
+  const latR = deg2rad(lat);
+  const sinAlt = Math.sin(latR) * sinDec + Math.cos(latR) * Math.cos(dec) * Math.cos(HA);
+  const elevation = rad2deg(Math.asin(sinAlt));
+  const cosAz = (sinDec - Math.sin(latR) * sinAlt) / (Math.cos(latR) * Math.cos(Math.asin(sinAlt)));
+  let azimuth = rad2deg(Math.acos(Math.max(-1, Math.min(1, cosAz))));
+  if (Math.sin(HA) > 0) azimuth = 360 - azimuth;
+  return { elevation, azimuth };
+}
+
+// Heures de lever et coucher du soleil (objets Date, timestamps UTC) pour la date et les coordonnées.
+function computeSunriseSunset(date, lat, lon) {
+  // Calcule lever/coucher en travaillant UNIQUEMENT en millisecondes UTC.
+  // Aucun appel à getHours(), setHours(), getTimezoneOffset() pour éviter
+  // tout problème de fuseau horaire côté navigateur/serveur HA.
+  //
+  // Algorithme NOAA simplifié. Retourne des objets Date (timestamps UTC)
+  // représentant le lever et coucher du jour de `date`.
+
+  const latR = deg2rad(lat);
+
+  // Jour julien du midi UTC du jour de `date`
+  // On prend minuit UTC du jour en cours, puis +12h
+  const msPerDay = 86400000;
+  const midnightUTC = date.getTime() - (date.getTime() % msPerDay);
+  const JD_noon = midnightUTC / msPerDay + 2440587.5 + 0.5; // midi UTC
+  const n = JD_noon - 2451545.0;
+
+  // Anomalie moyenne et longitude écliptique
+  const g = deg2rad(((357.528 + 0.9856003 * n) % 360 + 360) % 360);
+  const L = ((280.460 + 0.9856474 * n) % 360 + 360) % 360;
+  const lambda = deg2rad(L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g));
+
+  // Déclinaison
+  const eps  = deg2rad(23.439 - 0.0000004 * n);
+  const decl = Math.asin(Math.sin(eps) * Math.sin(lambda));
+
+  // Équation du temps (en jours)
+  const RA   = Math.atan2(Math.cos(eps) * Math.sin(lambda), Math.cos(lambda));
+  const EoT  = ((L / 360 - RA / (2 * Math.PI) + 0.5) % 1 - 0.5);
+  // Correction longitude (en jours). La formule NOAA est en longitude OUEST-positive ;
+  // Home Assistant fournit la longitude EST-positive → signe inversé (−lon/360).
+  // (Avant : +lon/360 → lever/coucher décalés, ~+1h50 à Berlin, ~+18min à Paris.)
+  const lonCorr = -lon / 360;
+
+  // Demi-durée du jour (en jours)
+  const cosH = (Math.cos(deg2rad(90.833)) - Math.sin(latR) * Math.sin(decl)) /
+               (Math.cos(latR) * Math.cos(decl));
+  if (Math.abs(cosH) > 1) return { sunrise: null, sunset: null };
+  const H = Math.acos(cosH) / (2 * Math.PI); // en jours
+
+  // Midi solaire vrai (en jours juliens)
+  const JD_transit = 2451545.0 + 0.0009 + lonCorr + n - EoT;
+
+  // Lever et coucher (en jours juliens)
+  const JD_rise = JD_transit - H;
+  const JD_set  = JD_transit + H;
+
+  // Convertir en millisecondes UTC (timestamp JS)
+  function jdToMs(jd) {
+    return (jd - 2440587.5) * msPerDay;
+  }
+
+  return {
+    sunrise: new Date(jdToMs(JD_rise)),
+    sunset:  new Date(jdToMs(JD_set)),
+  };
+}
+// Formate une Date en heure locale « HH:MM » (« --:-- » si absente).
+function formatTime(d) {
+  if (!d) return '--:--';
+  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ══════════════════════════════════════════════════════════
+//  WEATHER
+// ══════════════════════════════════════════════════════════
+const WEATHER_MAP = {
+  // cond : { icon, label, cloudy, rain, snow, fog, storm, cloudCover(0-1), sunVisible }
+  sunny:               { icon:'☀️',  label:'Ensoleillé',   cloudy:false, rain:false, snow:false, fog:false, storm:false, cloud:0.0, sun:true  },
+  partlycloudy:        { icon:'⛅',  label:'Mi-couvert',   cloudy:true,  rain:false, snow:false, fog:false, storm:false, cloud:0.4, sun:true  },
+  cloudy:              { icon:'☁️',  label:'Couvert',      cloudy:true,  rain:false, snow:false, fog:false, storm:false, cloud:0.9, sun:false },
+  rainy:               { icon:'🌧️', label:'Pluie',        cloudy:true,  rain:true,  snow:false, fog:false, storm:false, cloud:0.85,sun:false },
+  pouring:             { icon:'⛈️', label:'Averse',       cloudy:true,  rain:true,  snow:false, fog:false, storm:false, cloud:1.0, sun:false },
+  'lightning-rainy':   { icon:'⛈️', label:'Orage',        cloudy:true,  rain:true,  snow:false, fog:false, storm:true,  cloud:1.0, sun:false },
+  lightning:           { icon:'🌩️', label:'Foudre',       cloudy:true,  rain:false, snow:false, fog:false, storm:true,  cloud:1.0, sun:false },
+  fog:                 { icon:'🌫️', label:'Brouillard',   cloudy:true,  rain:false, snow:false, fog:true,  storm:false, cloud:1.0, sun:false },
+  snowy:               { icon:'❄️',  label:'Neige',        cloudy:true,  rain:false, snow:true,  fog:false, storm:false, cloud:0.95,sun:false },
+  'snowy-rainy':       { icon:'🌨️', label:'Grésil',       cloudy:true,  rain:true,  snow:true,  fog:false, storm:false, cloud:1.0, sun:false },
+  hail:                { icon:'🌨️', label:'Grêle',        cloudy:true,  rain:true,  snow:false, fog:false, storm:false, cloud:1.0, sun:false },
+  windy:               { icon:'💨',  label:'Venteux',      cloudy:false, rain:false, snow:false, fog:false, storm:false, cloud:0.1, sun:true  },
+  'windy-variant':     { icon:'🌬️', label:'Vent fort',    cloudy:false, rain:false, snow:false, fog:false, storm:false, cloud:0.2, sun:true  },
+  exceptional:         { icon:'⚠️',  label:'Exceptionnel', cloudy:false, rain:false, snow:false, fog:false, storm:false, cloud:0.0, sun:true  },
+  'clear-night':       { icon:'🌙',  label:'Nuit claire',  cloudy:false, rain:false, snow:false, fog:false, storm:false, cloud:0.0, sun:false },
+  'partly-cloudy-night':{ icon:'🌛', label:'Nuit nuageuse',cloudy:true,  rain:false, snow:false, fog:false, storm:false, cloud:0.4, sun:false },
+};
+// Métadonnées météo (icône, nuages, pluie, neige…) d'une condition HA, avec repli neutre.
+function getWeather(cond) {
+  return WEATHER_MAP[cond] || { icon:'🌡️', label:cond||'—', cloudy:false, rain:false, snow:false, fog:false, storm:false, cloud:0, sun:true };
+}
+
+// ══════════════════════════════════════════════════════════
+//  MOON
+// ══════════════════════════════════════════════════════════
+const MOON_PHASES = {
+  'new_moon':           { icon: '🌑', label: 'Nouvelle lune' },
+  'waxing_crescent':    { icon: '🌒', label: 'Croissant croissant' },
+  'first_quarter':      { icon: '🌓', label: 'Premier quartier' },
+  'waxing_gibbous':     { icon: '🌔', label: 'Gibbeuse croissante' },
+  'full_moon':          { icon: '🌕', label: 'Pleine lune' },
+  'waning_gibbous':     { icon: '🌖', label: 'Gibbeuse décroissante' },
+  'last_quarter':       { icon: '🌗', label: 'Dernier quartier' },
+  'waning_crescent':    { icon: '🌘', label: 'Croissant décroissant' },
+};
+
+
+// ══════════════════════════════════════════════════════════
+//  SKY GRADIENT
+// ══════════════════════════════════════════════════════════
+// Dégradé CSS du ciel selon l'élévation solaire et la météo (jour/nuit, nuages, pluie, brouillard…).
+function skyGradient(elev, wi) {
+  // wi peut être un objet weather ou un booléen (compat. ancien code)
+  const cloudy = (typeof wi === 'boolean') ? wi : (wi && wi.cloudy);
+  const rain   = wi && wi.rain;
+  const snow   = wi && wi.snow;
+  const fog    = wi && wi.fog;
+  const storm  = wi && wi.storm;
+
+  // Orage : ciel très sombre, reflets violets/verts
+  if (storm) return elev > 0
+    ? 'linear-gradient(180deg,#1a1a2e 0%,#2d2060 30%,#1a3040 70%,#0a1020 100%)'
+    : 'linear-gradient(180deg,#0d0d1a 0%,#1a1540 100%)';
+
+  // Brouillard : blanc-gris laiteux
+  if (fog) return 'linear-gradient(180deg,#b0bec5 0%,#cfd8dc 40%,#90a4ae 100%)';
+
+  // Neige : ciel blanc-gris perle
+  if (snow) return elev > 0
+    ? 'linear-gradient(180deg,#546e7a 0%,#90a4ae 40%,#b0bec5 100%)'
+    : 'linear-gradient(180deg,#37474f 0%,#546e7a 100%)';
+
+  // Pluie : ciel gris-bleu lourd
+  if (rain) return elev > 0
+    ? 'linear-gradient(180deg,#263238 0%,#37474f 30%,#455a64 60%,#2a3f4f 100%)'
+    : 'linear-gradient(180deg,#1c2833 0%,#2c3e50 100%)';
+
+  // Partiellement nuageux : ciel bleu avec nuages
+  const partlyCloudy = (typeof wi !== 'boolean') && wi && wi.cloud <= 0.5 && wi.cloudy && !wi.rain && !wi.snow && !wi.fog && !wi.storm;
+  if (partlyCloudy) {
+    if (elev > 45) return 'linear-gradient(180deg,#0d3a70 0%,#1a6abf 30%,#4aa0e0 60%,#80c8f8 80%,#1a3a5c 100%)';
+    if (elev > 20) return 'linear-gradient(180deg,#1a4a80 0%,#2d7cc0 30%,#5aaae8 60%,#90c8f8 80%,#1e3a60 100%)';
+    if (elev > 5)  return 'linear-gradient(180deg,#1e3870 0%,#3a70b8 30%,#6aaae0 60%,#a8d0f8 75%,#162840 100%)';
+    if (elev > 0)  return 'linear-gradient(180deg,#1a2a4a 0%,#c05018 20%,#e87030 35%,#b0c8e8 55%,#3870b0 75%,#0c1f3a 100%)';
+    return 'linear-gradient(180deg,#1f2937 0%,#111827 100%)';
+  }
+
+  // Ciel couvert classique
+  if (cloudy) {
+    if (elev > 20) return 'linear-gradient(180deg,#4a5568 0%,#6b7280 40%,#3d4f60 100%)';
+    if (elev > 5)  return 'linear-gradient(180deg,#374151 0%,#4a5568 50%,#2a3547 100%)';
+    if (elev > 0)  return 'linear-gradient(180deg,#374151 0%,#8a7060 40%,#111827 100%)';
+    return 'linear-gradient(180deg,#1f2937 0%,#111827 100%)';
+  }
+
+  // Ciel dégagé selon élévation
+  if (elev > 45) return 'linear-gradient(180deg,#003580 0%,#0055bb 30%,#0080e0 60%,#40aaff 80%,#1a3a5c 100%)';
+  if (elev > 20) return 'linear-gradient(180deg,#004090 0%,#0066cc 25%,#1a8fe8 55%,#55c0ff 75%,#0c2040 100%)';
+  if (elev > 5)  return 'linear-gradient(180deg,#1e3a6f 0%,#e8742a 25%,#f4924c 45%,#90c0e0 65%,#0c2040 100%)';
+  if (elev > 0)  return 'linear-gradient(180deg,#1a2a4a 0%,#c05018 20%,#e87030 35%,#f0a060 50%,#406080 70%,#0c1f3a 100%)';
+  if (elev > -6) return 'linear-gradient(180deg,#0f172a 0%,#1e2d4a 35%,#3d2060 65%,#1e1b4b 100%)';
+  return 'linear-gradient(180deg,#020617 0%,#060d1a 40%,#0d0820 100%)';
+}
+
+// ══════════════════════════════════════════════════════════
+//  CSS
+// ══════════════════════════════════════════════════════════
+const CARD_CSS = `
+  :host { display: block; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  .sfc-root {
+    font-family: 'Exo 2', 'Roboto', sans-serif;
+    background: var(--sfc-bg, #060d1a);
+    border-radius: 18px;
+    overflow: hidden;
+    color: var(--sfc-text, #e8f4fd);
+    isolation: isolate;
+    position: relative;
+    z-index: 0;
+    --solar:  var(--sfc-solar,  #FFD700);
+    --grid:   var(--sfc-grid,   #4FC3F7);
+    --batt:   var(--sfc-batt,   #69FF47);
+    --home:   var(--sfc-home,   #FF6B6B);
+    --card:   rgba(255,255,255,0.04);
+    --border: rgba(255,255,255,0.08);
+    --muted:  rgba(232,244,253,0.5);
+  }
+
+  /* ── Header ── */
+  .sfc-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid var(--border);
+  }
+  .sfc-title-row { display: flex; align-items: center; gap: 8px; }
+  .sfc-title { font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+  .sfc-badge {
+    font-size: 9px; font-weight: 700; letter-spacing: 1.2px; padding: 2px 8px;
+    border-radius: 20px; text-transform: uppercase; transition: all .5s;
+  }
+  .sfc-badge.idle        { background: rgba(100,100,120,.4); color:#aaa; border:1px solid rgba(180,180,200,.2); }
+  .sfc-badge.producing   { background: rgba(255,215,0,.15);  color:var(--solar); border:1px solid rgba(255,215,0,.3); }
+  .sfc-badge.charging    { background: rgba(105,255,71,.15); color:var(--batt);  border:1px solid rgba(105,255,71,.3); }
+  .sfc-badge.discharging { background: rgba(255,107,107,.15);color:var(--home);  border:1px solid rgba(255,107,107,.3); }
+  .sfc-weather { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+  .sfc-weather-temp { font-weight:700; color:var(--sfc-text,#e8f4fd); }
+  .sfc-live-dot { width:6px;height:6px;border-radius:50%;background:var(--batt);animation:sfc-blink 2s infinite; }
+  @keyframes sfc-blink { 0%,100%{opacity:1}50%{opacity:.2} }
+
+  /* ── Sky scene ── */
+  .sfc-scene { position:relative; overflow:hidden; isolation:isolate; }
+  .sfc-sun-arc-svg { position:absolute;inset:0;width:100%;height:100%; }
+  .sfc-sun-orb {
+    position:absolute; width:34px;height:34px; border-radius:50%;
+    transform:translate(-50%,-50%); transition:left 20s ease,top 20s ease;
+    z-index:4; pointer-events:none;
+  }
+  .sfc-sun-inner {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: radial-gradient(circle,
+      #ffffff 0%,
+      #ffe17a 25%,
+      #ffc400 50%,
+      rgba(255,200,0,0.4) 70%,
+      transparent 100%
+    );
+
+  box-shadow:
+    0 0 30px rgba(255,200,0,0.9),
+    0 0 80px rgba(255,180,0,0.6),
+    0 0 160px rgba(255,150,0,0.3);
+
+  animation: sfc-sun-pulse 3s ease-in-out infinite;
+}
+  @keyframes sfc-sun-pulse {
+    0%,100%{transform:scale(1);box-shadow:0 0 20px 8px rgba(255,200,0,.6),0 0 60px 20px rgba(255,150,0,.25)}
+    50%{transform:scale(1.1);box-shadow:0 0 28px 12px rgba(255,200,0,.75),0 0 80px 30px rgba(255,150,0,.4)}
+  }
+  .sfc-pv-badge {
+    position:absolute;top:10px;left:50%;transform:translateX(-50%);
+    background:rgba(0,0,0,.5);border:1px solid rgba(255,215,0,.3);border-radius:20px;
+    padding:4px 14px;display:flex;align-items:center;gap:6px;backdrop-filter:blur(8px);z-index:3;
+  }
+  .sfc-pv-val { font-family:monospace;font-size:calc(15px*var(--sfc-sv,1));font-weight:700;color:var(--solar);text-shadow:0 0 10px rgba(255,215,0,.6); }
+  .sfc-sun-time { position:absolute;top:8px;right:10px;font-family:monospace;font-size:13px;font-weight:600;
+    color:var(--solar);background:rgba(0,0,0,.4);padding:2px 7px;border-radius:7px;border:1px solid rgba(255,215,0,.2);z-index:3; }
+  .sfc-forecast-badge {
+    position:absolute;top:8px;left:10px;z-index:3;
+    font-family:monospace;font-size:13px;font-weight:600;
+    background:rgba(0,0,0,.4);border-radius:7px;
+    border:1px solid rgba(100,180,255,0.25);
+    padding:3px 8px;display:flex;flex-direction:column;gap:1px;
+    backdrop-filter:blur(4px);
+  }
+  .sfc-forecast-today    { color:#7ecfff; }
+  .sfc-forecast-tomorrow { color:rgba(180,210,255,0.65);font-size:12px; }
+  .sfc-sunrise { position:absolute;bottom:190px;left:10px;font-size:12px;color:var(--muted);font-weight:600;z-index:3; }
+  .sfc-sunset  { position:absolute;bottom:190px;right:10px;font-size:12px;color:var(--muted);font-weight:600;z-index:3; }
+
+  /* ── Flow scene ── */
+  /* ══════════════════════════════════════════
+     SCÈNE UNIFIÉE — version stable
+  ══════════════════════════════════════════ */
+  .sfc-unified-scene {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  /* Ciel */
+  .sfc-sky { position:absolute;inset:0;transition:background 20s linear; z-index: 0;}
+  /* Ciel/météo canvas (mode single) — bg derrière l'image (z:0), fg devant (z:6) */
+  .sfc-sky-canvas-bg { position:absolute; inset:0; z-index:0; pointer-events:none; }
+  .sfc-sky-canvas-fg { position:absolute; inset:0; z-index:6; pointer-events:none; }
+  /* Quand le canvas est actif, on masque les équivalents CSS pour éviter tout doublon */
+  .sfc-sky-canvas #sfcSky,
+  .sfc-sky-canvas #sfcStars,
+  .sfc-sky-canvas #sfcClouds,
+  .sfc-sky-canvas #sfcPartlyClouds,
+  .sfc-sky-canvas #sfcRain,
+  .sfc-sky-canvas #sfcSnow,
+  .sfc-sky-canvas #sfcLightningFx { display:none !important; }
+  .sfc-stars { position:absolute;inset:0;pointer-events:none;transition:opacity 3s; z-index: 0;}
+  .sfc-star { position:absolute;border-radius:50%;background:#fff;animation:sfc-twinkle 2s infinite alternate; }
+  @keyframes sfc-twinkle { 0%{opacity:.1}100%{opacity:.95} }
+  /* Nuages */
+  .sfc-clouds { position:absolute;inset:0;pointer-events:none;overflow:hidden; z-index: 1;}
+  .sfc-cloud-shape {
+    position:absolute;
+    background:rgba(255,255,255,0.55);
+    border-radius:999px;
+    overflow:hidden;
+    background-clip:padding-box;
+    filter:blur(10px);
+    transform:translateZ(0);
+    -webkit-transform:translateZ(0);
+    -webkit-backface-visibility:hidden;
+    animation:sfc-cloud-move linear infinite;
+  }
+  /* Nuages distincts pour "partiellement nuageux" */
+  .sfc-cloud-puff {
+    position:absolute;
+    border-radius:999px;
+    background:rgba(255,255,255,0.78);
+    filter:blur(6px);
+    transform:translateZ(0);
+    will-change:left;
+    animation:sfc-cloud-move linear infinite;
+  }
+  .sfc-partly-clouds { position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:2;opacity:0;transition:opacity 4s ease; }
+  @keyframes sfc-cloud-move { 0%{left:-300px} 100%{left:calc(100% + 300px)} }
+
+  /* Effets météo */
+  .sfc-weather-fx { position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:6; }
+  .sfc-raindrop {
+    position:absolute; top:-60px; width:1.5px; border-radius:2px;
+    background:linear-gradient(180deg,transparent 0%,rgba(174,210,255,0.85) 100%);
+    animation:sfc-rain-fall linear infinite;
+  }
+  @keyframes sfc-rain-fall {
+    0%   { transform:translateY(0) rotate(12deg); opacity:0; }
+    8%   { opacity:1; }
+    92%  { opacity:0.8; }
+    100% { transform:translateY(680px) rotate(12deg); opacity:0; }
+  }
+  .sfc-snowflake {
+    position:absolute; top:-20px; border-radius:50%;
+    background:rgba(255,255,255,0.92);
+    box-shadow:0 0 4px rgba(255,255,255,0.5);
+    animation:sfc-snow-fall ease-in-out infinite;
+  }
+  @keyframes sfc-snow-fall {
+    0%   { transform:translateY(0) translateX(0); opacity:0; }
+    10%  { opacity:0.88; }
+    25%  { transform:translateY(170px) translateX(15px); }
+    50%  { transform:translateY(340px) translateX(-12px); }
+    75%  { transform:translateY(510px) translateX(18px); }
+    92%  { opacity:0.6; }
+    100% { transform:translateY(680px) translateX(4px); opacity:0; }
+  }
+  .sfc-lightning-fx {
+    position:absolute;inset:0;pointer-events:none;z-index:10;opacity:0;
+    background:radial-gradient(ellipse at 65% 15%,rgba(210,225,255,0.75) 0%,rgba(180,200,255,0.3) 40%,transparent 70%);
+  }
+  .sfc-lightning-fx.sfc-flash { animation:sfc-lightning-strike 0.45s ease-out forwards; }
+  @keyframes sfc-lightning-strike {
+    0%   { opacity:0; }
+    6%   { opacity:1; }
+    18%  { opacity:0.05; }
+    28%  { opacity:0.85; }
+    42%  { opacity:0.02; }
+    100% { opacity:0; }
+  }
+
+  /* Arc solaire */
+  .sfc-sun-arc-svg { position:absolute;inset:0;width:100%;height:100%; }
+  .sfc-sun-arc-svg path { stroke-linecap:round; stroke-linejoin:round; }
+  .sfc-sun-arc-svg .sfc-sun-arc-bg { stroke-dasharray:none; opacity:0.7; }
+  .sfc-sun-arc-svg .sfc-sun-arc-active { filter:drop-shadow(0 0 10px rgba(255,215,0,0.35)); }
+  /* Horizon */
+  .sfc-horizon { display:none; }
+  /* Sol fondu */
+  .sfc-ground {
+    position:absolute;
+    bottom:0; left:0; right:0;
+    height:22%;
+    background:linear-gradient(180deg,
+      rgba(6,13,26,0) 0%,
+      rgba(6,13,26,0.75) 20%,
+      rgba(6,13,26,0.97) 60%,
+      rgba(6,13,26,1) 100%);
+    pointer-events:none;
+  }
+  /* Plan d'eau */
+  .sfc-water {
+    position:absolute;
+    bottom:0; left:0; right:0;
+    height:25%;
+    background:linear-gradient(180deg,
+      rgba(20,60,120,0.0) 0%,
+      rgba(20,60,120,0.5) 35%,
+      rgba(8,25,60,0.88) 100%);
+    z-index:1;
+  }
+  .sfc-water::before {
+    content:'';
+    position:absolute;inset:0;
+  }
+  @keyframes sfc-ripple { 0%{background-position-x:0} 100%{background-position-x:40px} }
+  .sfc-water-line {
+    position:absolute;
+    bottom:22%; left:0; right:0;
+    height:1px;
+    background:linear-gradient(90deg,
+      transparent 0%,
+      rgba(100,180,255,0.35) 15%,
+      rgba(160,220,255,0.80) 50%,
+      rgba(100,180,255,0.35) 85%,
+      transparent 100%);
+    z-index:2;
+  }
+  /* Zone énergie — v1.3.1 style */
+  .sfc-energy-row {
+    position:absolute;
+    bottom:0; left:0; right:0;
+    height:44%;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    padding:0 8px 10px;
+    padding-bottom: 18px;
+    z-index:3;
+  }
+  .sfc-energy-row .sfc-flow-svg {
+    position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;
+  }
+  .sfc-scene-image-wrap {
+    position: absolute;
+    inset: 0;                    /* couvre toute la scène */
+    z-index: 2;                  /* au-dessus du ciel z-index:0 */
+    pointer-events: none;
+    /* PAS de overflow:hidden — laisser le PNG transparent respirer */
+  }
+
+  .sfc-scene-image-wrap .sfc-scene-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;         /* respecte les proportions du PNG */
+    object-position: bottom center;
+    display: block;
+    /* PAS de mask-image — le PNG transparent fait le travail seul */
+  }
+  /* Nœuds images */
+  .sfc-img-node {
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+    z-index:2; position:relative; flex:1;
+  }
+  
+  .sfc-img-node img {
+    object-fit: contain;
+    filter: drop-shadow(0 6px 18px rgba(0,0,0,0.6));
+    transition: transform 0.3s, filter 0.3s;
+  }
+  
+  .sfc-img-node.active img {
+    transform: translateY(-3px) scale(1.03);
+  }
+  
+  #sfcRouterNode1 {
+    transform: translateY(8px);
+  }
+  
+  .sfc-router-node::after {
+    content: '';
+    width: 60%;
+    height: 6px;
+    background: radial-gradient(ellipse, rgba(0,0,0,0.4), transparent);
+    border-radius: 50%;
+    margin-top: 4px;
+  }
+  .sfc-router-node.active .sfc-router-label {
+    color: #FFA040;
+  }
+
+  .sfc-router-node.active::before {
+    content: '';
+    position: absolute;
+    inset: -10px;
+    border-radius: 12px;
+    background: radial-gradient(circle, rgba(255,165,0,0.15), transparent);
+    z-index: -1;
+  }
+
+  .sfc-img-node.node-grid    img { height:70px; }
+  .sfc-img-node.node-home    img { height:100px; margin-bottom:-10px; }
+  .sfc-img-node.node-overlay img { height:60px; }
+  .sfc-img-node.charging     img { filter:drop-shadow(0 0 14px rgba(105,255,71,0.8)); }
+  .sfc-img-node.discharging  img { filter:drop-shadow(0 0 14px rgba(255,107,107,0.8)); }
+
+  /* ══ BATTERIE LIQUIDE — version stable ══ */
+  .sfc-img-node.node-battery img { height:70px; }
+  .sfc-batt-wrapper {
+    transform: translateY(4px);
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 80px;
+    height: 80px;
+    isolation: isolate;
+    top: 15px;
+  }
+
+  /* Zone liquide calibrée dans le cylindre */
+  .sfc-batt-liquid-wrap {
+    position: absolute;
+    top: 18%;
+    bottom: 31%;
+    left: 36%;
+    right: 36%;
+    border-radius: 2px;
+    overflow: hidden;
+    z-index: 1;
+  }
+  .sfc-batt-empty {
+    position:absolute;inset:0;
+    background:rgba(10,20,40,0.7);
+  }
+  .sfc-batt-fill {
+    position:absolute;
+    bottom:0; left:0; right:0;
+    height:0%;
+    /* hauteur animée par GSAP — pas de transition CSS */
+    background:linear-gradient(180deg,
+      rgba(0,220,255,0.9) 0%,
+      rgba(0,160,255,1) 40%,
+      rgba(0,100,220,1) 100%);
+    border-radius:4px 4px 0 0;
+    will-change:height;
+  }
+  .sfc-batt-wave {
+    position:absolute;
+    bottom:0; left:0; right:0;
+    height:0%;
+    overflow:hidden;
+    will-change:height;
+  }
+  .sfc-batt-wave::before {
+    content:'';
+    position:absolute;
+    top:-8px; left:-60%;
+    width:220%; height:16px;
+    background:rgba(255,255,255,0.35);
+    border-radius:50%;
+    animation:sfc-wave var(--wave-spd, 2.5s) linear infinite;
+  }
+  .sfc-batt-wave::after {
+    content:'';
+    position:absolute;
+    top:-5px; left:-40%;
+    width:180%; height:10px;
+    background:rgba(255,255,255,0.2);
+    border-radius:50%;
+    animation:sfc-wave calc(var(--wave-spd, 2.5s) * 1.45) linear infinite reverse;
+  }
+  @keyframes sfc-wave { from{transform:translateX(0)} to{transform:translateX(45%)} }
+  /* Image batterie au-dessus (mix-blend-mode:screen = fond blanc→visible, fond noir→transparent) */
+  .sfc-batt-img {
+    mix-blend-mode: normal;
+    background: transparent;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    /* z-index 2 = AU-DESSUS du liquide (z-index 1)
+       Pas de mix-blend-mode : le fond noir de battery.png
+       masque naturellement le liquide hors du cylindre. */
+    z-index: 0;
+    pointer-events: none;
+    filter: drop-shadow(0 4px 16px rgba(0,0,0,0.6));
+    transition: filter 0.5s;
+  }
+  .sfc-batt-shine {
+    position:absolute;
+    top:14%; left:22%; right:55%; bottom:12%;
+    background:linear-gradient(180deg,rgba(255,255,255,0.25) 0%,rgba(255,255,255,0.05) 100%);
+    border-radius:4px;
+    z-index:3;
+    pointer-events:none;
+    opacity: 0.1;
+  }
+  .sfc-batt-soc-text {
+    position:absolute;
+    top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    font-family:monospace;
+    font-size:calc(15px*var(--sfc-sv,1)); font-weight:900;
+    color:#fff;
+    text-shadow:0 1px 4px rgba(0,0,0,0.9), 0 0 12px rgba(0,200,255,0.6);
+    z-index:4;
+    pointer-events:none;
+  }
+  .sfc-batt-wrapper.charging .sfc-batt-fill {
+    background:linear-gradient(180deg,rgba(105,255,71,0.9) 0%,rgba(0,200,100,1) 40%,rgba(0,140,60,1) 100%);
+    animation:sfc-batt-charge 2s ease-in-out infinite;
+  }
+  .sfc-batt-wrapper.discharging .sfc-batt-fill {
+    background:linear-gradient(180deg,rgba(255,180,0,0.9) 0%,rgba(255,100,0,1) 40%,rgba(200,50,0,1) 100%);
+  }
+  .sfc-batt-wrapper.low .sfc-batt-fill {
+    background:linear-gradient(180deg,rgba(255,80,80,0.9) 0%,rgba(200,20,20,1) 100%);
+    animation:sfc-batt-low 1s ease-in-out infinite;
+  }
+  @keyframes sfc-batt-charge { 0%,100%{filter:brightness(1)} 50%{filter:brightness(1.3)} }
+  @keyframes sfc-batt-low    { 0%,100%{opacity:1} 50%{opacity:0.55} }
+
+  /* Labels */
+  .sfc-img-label { font-size:calc(8px*var(--sfc-sl,1));letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:700; }
+  .sfc-img-val   { font-family:monospace;font-size:calc(12px*var(--sfc-sv,1));font-weight:700;text-shadow:0 0 6px currentColor;transition:all .5s; }
+  .sfc-img-sub   { font-size:calc(9px*var(--sfc-sv,1));color:var(--muted); }
+
+  /* ── Routeurs solaires ── */
+  /* Les routeurs sont maintenant intégrés dans .sfc-energy-row */
+  .sfc-router-row { display: contents; } /* dissout dans le flux flex parent */
+  .sfc-router-node {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    pointer-events: auto;
+  }
+  .sfc-router-node img {
+    object-fit: contain;
+    filter: drop-shadow(0 2px 10px rgba(0,0,0,0.7));
+    transition: filter 0.5s;
+  }
+  .sfc-router-node.active img {
+    filter: drop-shadow(0 0 14px rgba(255,165,0,0.8)) drop-shadow(0 2px 10px rgba(0,0,0,0.5));
+    animation: sfc-router-pulse 2s ease-in-out infinite;
+  }
+  @keyframes sfc-router-pulse {
+    0%,100% { filter: drop-shadow(0 0 8px rgba(255,165,0,0.6)); }
+    50%      { filter: drop-shadow(0 0 18px rgba(255,165,0,1)); }
+  }
+  .sfc-router-label {
+    font-size: calc(8px*var(--sfc-sl,1)); letter-spacing: 1px; text-transform: uppercase;
+    color: var(--muted); font-weight: 700;
+    background: rgba(6,13,26,0.6); padding: 1px 5px; border-radius: 4px;
+  }
+  .sfc-router-val {
+    font-family: monospace; font-size: calc(11px*var(--sfc-sv,1)); font-weight: 700;
+    color: #FFA040; text-shadow: 0 0 6px rgba(255,160,64,0.6);
+    background: rgba(6,13,26,0.55); padding: 1px 5px; border-radius: 4px;
+  }
+  .sfc-router-val.inactive { color: var(--muted); text-shadow: none; }
+  /* Ligne de flux vers routeur */
+  .sfc-router-svg {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 3;
+  }
+  .sfc-router-line {
+    fill: none; stroke: #FFA040; stroke-width: 1.5;
+    stroke-dasharray: 6 5; animation: sfc-dash 1.2s linear infinite;
+    opacity: 0; transition: opacity 0.5s;
+  }
+  .sfc-router-line.active { opacity: 1; }
+
+  .sfc-batt-flow-power {
+    position:absolute;
+    left: 72%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: none;
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--batt);
+    text-shadow: 0 0 8px currentColor, 0 1px 4px rgba(102, 69, 69, 0.85);
+    background: rgba(6,13,26,0.65);
+    border: 1px solid rgba(105,255,71,0.25);
+    border-radius: 6px;
+    padding: 2px 7px;
+    pointer-events: none;
+    white-space: nowrap;
+    }
+    .sfc-batt-flow-power.discharge {
+    color: #FFB340;
+    border-color: rgba(255,179,64,0.28);
+    }
+
+  /* SOC bar under battery */
+  .sfc-soc-bar {
+    width: 50px; height: 4px; background: rgba(255,255,255,0.1);
+    border-radius: 3px; overflow: hidden; margin-top: -2px;
+  }
+  .sfc-soc-fill {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, #69FF47, #00D4AA);
+    transition: width 1.5s ease;
+  }
+
+  .sfc-flow {
+    position:relative;height:160px;display:flex;align-items:center;
+    justify-content:space-between;padding:10px 14px;
+    background:linear-gradient(180deg,rgba(6,13,26,0) 0%,rgba(6,13,26,.95) 45%,rgba(6,13,26,1) 100%);
+  }
+  .sfc-flow-svg { position:absolute;inset:0;width:100%;height:100%;pointer-events:none; }
+  .sfc-flow-core,
+  .sfc-sun-flow-core {
+    fill:none;
+    color:var(--flow-color, #fff);
+    stroke-linecap:round;
+    opacity:.34;
+    filter:drop-shadow(0 0 3px currentColor);
+    transition:opacity .35s ease;
+  }
+  .sfc-flow-core { stroke-width:calc(1*var(--sfc-sf,1)); }
+  .sfc-sun-flow-core { stroke-width:calc(2*var(--sfc-sf,1)); }
+  .sfc-flow-neon,
+  .sfc-flow-tail-mid,
+  .sfc-flow-tail-long,
+  .sfc-sun-flow-neon,
+  .sfc-sun-flow-tail-mid,
+  .sfc-sun-flow-tail-long {
+    fill:none;
+    color:var(--flow-color, #fff);
+    stroke-linecap:round;
+    transition:opacity .35s ease;
+  }
+  /* DrawSVGPlugin gère l'animation — stroke-dasharray et animation sont
+     réinitialisés via el.style dans animateFlow() avant que GSAP prenne la main */
+  .sfc-flow-neon,
+  .sfc-sun-flow-neon {
+    stroke-dasharray: none;
+    opacity: 1;
+    animation: none;
+    filter:
+      drop-shadow(0 0 2px currentColor)
+      drop-shadow(0 0 6px currentColor)
+      drop-shadow(0 0 12px currentColor);
+  }
+
+  .sfc-flow-tail-mid,
+  .sfc-sun-flow-tail-mid {
+    stroke-dasharray: none;
+    opacity: .20;
+    animation: none;
+    filter: blur(.7px) drop-shadow(0 0 7px currentColor);
+  }
+
+  .sfc-flow-tail-long,
+  .sfc-sun-flow-tail-long {
+    stroke-dasharray: none;
+    opacity: .08;
+    animation: none;
+    filter: blur(1.6px) drop-shadow(0 0 18px currentColor);
+  }
+  .sfc-flow-neon { stroke-width:calc(1.2*var(--sfc-sf,1)); }
+  .sfc-flow-tail-mid { stroke-width:calc(1.6*var(--sfc-sf,1)); }
+  .sfc-flow-tail-long { stroke-width:calc(2.2*var(--sfc-sf,1)); }
+  .sfc-sun-flow-neon { stroke-width:calc(1.2*var(--sfc-sf,1)); }
+  .sfc-sun-flow-tail-mid { stroke-width:calc(1.6*var(--sfc-sf,1)); animation-duration:1.65s; }
+  .sfc-sun-flow-tail-long { stroke-width:calc(2.2*var(--sfc-sf,1)); animation-duration:1.65s; }
+  .sfc-flow-core.inactive,
+  .sfc-sun-flow-core.inactive { opacity:.08; }
+  .sfc-flow-neon.inactive,
+  .sfc-flow-tail-mid.inactive,
+  .sfc-flow-tail-long.inactive,
+  .sfc-sun-flow-neon.inactive,
+  .sfc-sun-flow-tail-mid.inactive,
+  .sfc-sun-flow-tail-long.inactive { opacity:0; animation:none; }
+
+  @keyframes sfc-neon-head-flow {
+    from { stroke-dashoffset: 0; }
+    to   { stroke-dashoffset: -300; }
+  }
+  @keyframes sfc-neon-mid-flow {
+    from { stroke-dashoffset: 56; }
+    to   { stroke-dashoffset: -244; }
+  }
+  @keyframes sfc-neon-long-flow {
+    from { stroke-dashoffset: 102; }
+    to   { stroke-dashoffset: -198; }
+  }
+
+  .sfc-flow-line.inactive { animation:none;stroke-dasharray:4 8;opacity:.15; }
+  @keyframes sfc-dash { to{stroke-dashoffset:-28} }
+  .sfc-node { display:flex;flex-direction:column;align-items:center;gap:3px;z-index:2;min-width:60px; }
+  .sfc-node-icon { font-size:28px; }
+  .sfc-node-label { font-size:calc(8px*var(--sfc-sl,1));letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:700; }
+  .sfc-node-val { font-family:monospace;font-size:calc(12px*var(--sfc-sv,1));font-weight:700;text-shadow:0 0 6px currentColor;transition:all .5s; }
+  .sfc-node-sub { font-size:calc(9px*var(--sfc-sv,1));color:var(--muted); }
+  .c-solar  { color:var(--solar); }
+  .c-grid   { color:var(--grid); }
+  .c-batt   { color:var(--batt); }
+  .c-home   { color:var(--home); }
+  .c-muted  { color:var(--muted); }
+
+  /* ── Progress bars ── */
+  .sfc-progress { display:flex;flex-direction:column;gap:7px;padding:10px 14px;
+    background:var(--card);border-bottom:1px solid var(--border); }
+  .sfc-prow { display:flex;align-items:center;gap:8px; }
+  .sfc-plabel { width:26px;font-size:calc(8px*var(--sfc-sl,1));letter-spacing:.5px;text-transform:uppercase;color:var(--muted);font-weight:700; }
+  .sfc-ptrack { flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:10px;overflow:hidden; }
+  .sfc-pfill { height:100%;border-radius:10px;transition:width 1.5s cubic-bezier(.4,0,.2,1); }
+  .sfc-pfill.pv   { background:linear-gradient(90deg,#A8FF3E,#FFD700); }
+  .sfc-pfill.pwr  { background:linear-gradient(90deg,#4FC3F7,#0099FF); }
+  .sfc-pfill.batt { background:linear-gradient(90deg,#69FF47,#00D4AA); }
+  .sfc-ppct { width:32px;text-align:right;font-family:monospace;font-size:calc(9px*var(--sfc-sv,1));font-weight:600; }
+
+  /* ── Metric cards ── */
+  /* Tuiles en flex : 3 par ligne au maximum, et la dernière ligne s'étire pour remplir toute
+     la largeur (2 tuiles → 50 % chacune, 1 tuile → 100 %) via flex-grow — plus de trou à droite. */
+  .sfc-metrics { display:flex;flex-wrap:wrap;gap:7px;padding:0 10px; }
+  .sfc-metrics > * { flex:1 1 calc(33.333% - 5px);min-width:0; }      /* cols-3 (défaut) */
+  .sfc-metrics.cols-2 > * { flex-basis:calc(50% - 4px); }            /* cols-2 */
+  .sfc-mc {
+    background:var(--card);border:1px solid var(--border);border-radius:11px;
+    padding:9px 11px;display:flex;flex-direction:column;align-items:center;gap:3px;
+    text-align:center;
+    transition:background .2s;cursor:default;
+  }
+  .sfc-mc:hover { background:rgba(255,255,255,.07); }
+  .sfc-mc-header { display:flex;align-items:center;justify-content:center;gap:5px;font-size:calc(9px*var(--sfc-sl,1));letter-spacing:1px;
+    text-transform:uppercase;color:var(--muted);font-weight:700; }
+  .sfc-mc-val { font-family:monospace;font-size:calc(14px*var(--sfc-sv,1));font-weight:700;
+    text-shadow:0 0 6px currentColor;transition:all .5s; }
+  .sfc-mc-sub { font-size:calc(10px*var(--sfc-sv,1));color:var(--muted);font-family:monospace; }
+
+  /* ── Bilan & Performance ── */
+  .sfc-balance { margin:0 10px;background:var(--card);border:1px solid var(--border);border-radius:11px;
+    padding:11px 13px;display:flex;flex-direction:column;gap:9px; }
+  .sfc-bal-grade { display:flex;align-items:center;gap:12px; }
+  .sfc-bal-letter { font-family:monospace;font-size:calc(30px*var(--sfc-sv,1));font-weight:800;line-height:1;
+    min-width:46px;text-align:center;text-shadow:0 0 10px currentColor; }
+  .sfc-bal-meta { display:flex;flex-direction:column;gap:1px; }
+  .sfc-bal-score { font-family:monospace;font-size:calc(14px*var(--sfc-sv,1));font-weight:700; }
+  .sfc-bal-qual { font-size:calc(11px*var(--sfc-sl,1));color:var(--muted); }
+  .sfc-bal-rates { margin-left:auto;display:flex;flex-direction:column;gap:3px;text-align:right; }
+  .sfc-bal-rate { font-family:monospace;font-size:calc(13px*var(--sfc-sv,1));font-weight:700; }
+  .sfc-bal-rate-lbl { display:block;font-size:calc(8px*var(--sfc-sl,1));letter-spacing:.6px;
+    text-transform:uppercase;color:var(--muted);font-weight:700; }
+  .sfc-bal-flow { border-top:1px solid var(--border);padding-top:7px; }
+  .sfc-bal-flow-head { font-size:calc(9px*var(--sfc-sl,1));letter-spacing:1px;text-transform:uppercase;
+    color:var(--muted);font-weight:700;margin-bottom:3px; }
+  .sfc-bal-flow-body { font-family:monospace;font-size:calc(12px*var(--sfc-sv,1));line-height:1.6; }
+  .sfc-bal-dim { color:var(--muted); }
+  .sfc-bal-hint { font-size:calc(8px*var(--sfc-sl,1));color:var(--muted);font-style:italic;text-align:right;margin-top:-4px; }
+
+  /* ── Mode badge ── */
+  .sfc-mode { display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:2px 10px;
+    border-radius:20px;font-size:10px;font-weight:700;transition:all .5s;
+    text-align:center;align-self:center;max-width:100%; }
+  .sfc-mode.discharge { background:rgba(255,107,107,.15);color:var(--home);border:1px solid rgba(255,107,107,.3); }
+  .sfc-mode.charge    { background:rgba(105,255,71,.15);color:var(--batt);border:1px solid rgba(105,255,71,.3); }
+  .sfc-mode.idle      { background:rgba(100,100,120,.3);color:#aaa;border:1px solid rgba(180,180,200,.2); }
+
+  /* ── Endurance ── */
+  .sfc-endurance {
+    display:flex;align-items:center;justify-content:space-between;
+    background:var(--card);border:1px solid var(--border);border-radius:11px;
+    padding:9px 12px;margin:0 10px;
+  }
+  .sfc-end-left { display:flex;align-items:center;gap:7px;font-size:calc(9px*var(--sfc-sl,1));
+    letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:700; }
+  .sfc-end-val { font-family:monospace;font-size:calc(14px*var(--sfc-sv,1));font-weight:700;color:var(--batt);text-shadow:0 0 6px rgba(105,255,71,.4); }
+  .sfc-end-sub { font-size:calc(10px*var(--sfc-sv,1));color:var(--muted);margin-left:4px; }
+
+  /* ── Économies & ROI ── */
+  .sfc-savings {
+    background:var(--card);border:1px solid var(--border);border-radius:11px;
+    padding:9px 9px;margin:0 10px;
+    display:flex;flex-direction:column;gap:7px;
+  }
+  .sfc-savings-header {
+    display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:1px;
+  }
+  .sfc-savings-title {
+    font-size:calc(9px*var(--sfc-sl,1));font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);flex:1;
+  }
+  .sfc-savings-price {
+    font-family:monospace;font-size:calc(11px*var(--sfc-sv,1));font-weight:700;color:#FFD700;
+    background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.22);
+    border-radius:6px;padding:2px 7px;white-space:nowrap;
+  }
+  .sfc-tempo-badge {
+    font-family:monospace;font-size:calc(11px*var(--sfc-sv,1));font-weight:700;border-radius:6px;padding:2px 8px;white-space:nowrap;
+  }
+  .sfc-tempo-blue  { background:rgba(30,120,255,0.18);color:#7ad;border:1px solid rgba(30,120,255,0.35); }
+  .sfc-tempo-white { background:rgba(200,210,230,0.18);color:#cce;border:1px solid rgba(200,210,230,0.35); }
+  .sfc-tempo-red   { background:rgba(255,40,40,0.20);color:#f88;border:1px solid rgba(255,40,40,0.40); }
+  .sfc-tempo-tomorrow { font-size:calc(10px*var(--sfc-sv,1));opacity:0.8;border-style:dashed; }
+  .sfc-savings-row { display:flex;align-items:center;gap:4px; }
+  .sfc-sav-lbl {
+    font-size:calc(9px*var(--sfc-sl,1));letter-spacing:1px;text-transform:uppercase;color:var(--muted);
+    width:76px;flex-shrink:0;
+  }
+  .sfc-sav-val {
+    font-family:monospace;font-size:calc(14px*var(--sfc-sv,1));font-weight:700;
+    color:#69FF47;text-shadow:0 0 6px rgba(105,255,71,0.35);flex:1;
+  }
+  .sfc-sav-co2 { font-family:monospace;font-size:calc(10px*var(--sfc-sv,1));color:#6af;text-align:right;white-space:nowrap; }
+  .sfc-savings-sep { height:1px;background:var(--border);margin:1px 0; }
+  .sfc-roi-row { display:flex;align-items:center;gap:8px; }
+  .sfc-roi-bar-wrap {
+    flex:1;height:5px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;
+  }
+  .sfc-roi-bar {
+    height:100%;width:0%;background:linear-gradient(90deg,#69FF47,#FFD700);
+    border-radius:3px;transition:width 1.5s ease;
+  }
+  .sfc-roi-val {
+    font-family:monospace;font-size:calc(14px*var(--sfc-sv,1));font-weight:700;color:#FFD700;
+    white-space:nowrap;min-width:50px;text-align:right;
+  }
+  .sfc-roi-dates {
+    font-family:monospace;font-size:calc(10px*var(--sfc-sv,1));color:var(--muted);
+    text-align:center;margin-top:-1px;
+  }
+  .sfc-roi-dates .sfc-roi-gain { color:#69FF47;font-weight:700; }
+
+  /* ── État de santé batterie ── */
+  .sfc-health {
+    background:var(--card);border:1px solid var(--border);border-radius:11px;
+    padding:9px 9px;margin:0 10px;
+    display:flex;flex-direction:column;gap:7px;
+  }
+  .sfc-health-row { display:flex;align-items:center;gap:8px; }
+  .sfc-health-lbl {
+    font-size:calc(9px*var(--sfc-sl,1));letter-spacing:1px;text-transform:uppercase;color:var(--muted);
+    width:70px;flex-shrink:0;
+  }
+  .sfc-health-bar-wrap {
+    flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;
+  }
+  .sfc-health-bar {
+    height:100%;width:0%;border-radius:3px;transition:width 1.5s ease,background .4s;
+  }
+  .sfc-health-val {
+    font-family:monospace;font-size:calc(14px*var(--sfc-sv,1));font-weight:700;
+    white-space:nowrap;min-width:48px;text-align:right;
+  }
+  .sfc-health-sub {
+    font-family:monospace;font-size:calc(14px*var(--sfc-sv,1));font-weight:700;color:#e8f4fd;flex:1;
+  }
+  .sfc-health-cycles { font-family:monospace;font-size:calc(10px*var(--sfc-sv,1));font-weight:700;color:#7ecfff;text-align:right; }
+  .soh-good { color:#69FF47; }
+  .soh-mid  { color:#FFD700; }
+  .soh-low  { color:#FF6B6B; }
+  .soh-good-bg { background:linear-gradient(90deg,#3fae2a,#69FF47); }
+  .soh-mid-bg  { background:linear-gradient(90deg,#caa000,#FFD700); }
+  .soh-low-bg  { background:linear-gradient(90deg,#c0392b,#FF6B6B); }
+
+  /* ── Section title ── */
+  .sfc-section { font-size:calc(8px*var(--sfc-sl,1));letter-spacing:2px;text-transform:uppercase;
+    color:var(--muted);font-weight:700;display:flex;align-items:center;gap:5px;
+    padding:0 10px; }
+  .sfc-section::before { content:'';width:12px;height:2px;background:var(--solar);border-radius:1px; }
+
+  /* ── Inverter ── */
+  .sfc-inv { display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:7px;padding:0 10px; }
+  .sfc-inv-card {
+    background:var(--card);border:1px solid var(--border);border-radius:11px;
+    padding:9px 6px;display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;
+    transition:background .2s;
+  }
+  .sfc-inv-card:hover { background:rgba(255,255,255,.07); }
+  .sfc-inv-icon { font-size:18px; }
+  .sfc-inv-label { font-size:calc(9px*var(--sfc-sl,1));letter-spacing:.8px;text-transform:uppercase;color:var(--muted);font-weight:700; }
+  .sfc-inv-val { font-family:monospace;font-size:calc(14px*var(--sfc-sv,1));font-weight:700;text-shadow:0 0 5px currentColor; }
+  .sfc-inv-sub { font-family:monospace;font-size:calc(10px*var(--sfc-sv,1));color:var(--batt); }
+
+  /* ── Routeurs (énergie) — grille responsive selon le nombre de routeurs actifs ── */
+  .sfc-routers { display:grid;gap:7px;padding:0 10px; }   /* grid-template-columns posé en inline */
+  .sfc-rt-card {
+    position:relative;
+    background:var(--card);border:1px solid var(--border);border-radius:11px;
+    border-top:2px solid var(--rt,#FFA040);
+    padding:9px 6px;display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;
+    transition:background .2s;overflow:hidden;
+  }
+  /* halo coloré discret en fond, à la couleur du routeur */
+  .sfc-rt-card::before {
+    content:'';position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(120% 80% at 50% 0%, var(--rt,#FFA040) 0%, transparent 60%);
+    opacity:0.10;
+  }
+  .sfc-rt-card > * { position:relative; }
+  .sfc-rt-card:hover { background:rgba(255,255,255,.07); }
+  .sfc-rt-ico     { font-size:calc(22px*var(--sfc-sv,1));line-height:1;filter:drop-shadow(0 0 6px currentColor); }
+  .sfc-rt-ico-img { height:30px;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+  .sfc-rt-name { font-size:calc(9px*var(--sfc-sl,1));letter-spacing:.8px;text-transform:uppercase;color:var(--muted);font-weight:700; }
+  .sfc-rt-day  { font-family:monospace;font-size:calc(15px*var(--sfc-sv,1));font-weight:700;color:var(--rt,#FFA040);text-shadow:0 0 6px currentColor;transition:opacity .3s; }
+  /* Énergie du jour — donnée secondaire mise en avant (pastille colorée) */
+  .sfc-rt-energy { font-family:monospace;font-size:calc(13px*var(--sfc-sv,1));font-weight:700;
+    color:var(--rt,#FFA040);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);
+    border-radius:8px;padding:3px 10px;margin-top:1px;line-height:1.2; }
+  .sfc-rt-energy small { display:block;font-size:calc(7.5px*var(--sfc-sl,1));color:var(--muted);
+    letter-spacing:1px;text-transform:uppercase;font-weight:700; }
+  /* Mois / Année / Total — donnée tertiaire discrète */
+  .sfc-rt-sub  { font-family:monospace;font-size:calc(9px*var(--sfc-sv,1));color:var(--muted);line-height:1.5; }
+
+  /* ── Véhicule électrique — section dédiée ── */
+  .sfc-ev-card {
+    background:var(--card);border:1px solid var(--border);border-radius:11px;
+    padding:10px 11px;margin:0 10px;
+    display:flex;align-items:center;justify-content:space-around;gap:8px;flex-wrap:wrap;
+  }
+  .sfc-ev-item { display:flex;flex-direction:column;align-items:center;gap:2px;min-width:60px; }
+  .sfc-ev-lbl  { font-size:calc(8px*var(--sfc-sl,1));letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:700; }
+  .sfc-ev-val  { font-family:monospace;font-size:calc(14px*var(--sfc-sv,1));font-weight:700;text-shadow:0 0 5px currentColor; }
+
+  /* ── Spacer ── */
+  .sfc-gap { height:8px; }
+
+  /* ── Panneau détails (clic sur une zone) ── */
+  .sfc-clickable [data-detail] { cursor: pointer; }
+  .sfc-detail {
+    position:absolute; inset:0; z-index:50;
+    display:none; align-items:center; justify-content:center;
+    background:rgba(2,6,16,0.72); backdrop-filter:blur(3px);
+    padding:18px;
+  }
+  .sfc-detail.open { display:flex; }
+  .sfc-detail-card {
+    width:100%; max-width:380px; max-height:86%;
+    background:var(--sfc-bg,#0b1830); border:1px solid var(--border);
+    border-radius:14px; overflow:hidden; display:flex; flex-direction:column;
+    box-shadow:0 12px 40px rgba(0,0,0,0.6);
+  }
+  .sfc-detail-head {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 14px; background:rgba(255,255,255,0.04); border-bottom:1px solid var(--border);
+  }
+  .sfc-det-title { font-size:13px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--sfc-text,#e8f4fd); }
+  .sfc-det-close { cursor:pointer; font-size:16px; color:var(--muted); padding:2px 6px; border-radius:6px; }
+  .sfc-det-close:hover { background:rgba(255,255,255,0.1); color:var(--sfc-text,#e8f4fd); }
+  .sfc-det-body { padding:6px 14px 12px; overflow:auto; }
+  .sfc-det-row {
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);
+  }
+  .sfc-det-row:last-child { border-bottom:none; }
+  .sfc-det-name { font-size:12px; color:var(--muted); }
+  .sfc-det-val  { font-family:monospace; font-size:13px; font-weight:700; color:var(--sfc-text,#e8f4fd); text-align:right; white-space:nowrap; }
+
+  /* ═══════════════════════════════════════
+     EDITOR STYLES
+  ═══════════════════════════════════════ */
+  .sfc-editor {
+    font-family: 'Roboto', sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    padding: 0;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .sfc-ed-title {
+    background: linear-gradient(135deg, #0d7377, #14a085);
+    padding: 14px 18px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sfc-ed-section {
+    border-bottom: 1px solid rgba(255,255,255,.08);
+  }
+  .sfc-ed-section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px; cursor: pointer;
+    background: rgba(255,255,255,.02);
+    transition: background .2s;
+    font-weight: 600; font-size: 13px; letter-spacing: .5px;
+    user-select: none;
+  }
+  .sfc-ed-section-header:hover { background: rgba(255,255,255,.05); }
+  .sfc-ed-section-header.active { color: #14a085; }
+  .sfc-ed-chevron { transition: transform .2s; font-style: normal; }
+  .sfc-ed-chevron.open { transform: rotate(180deg); }
+  .sfc-ed-body { padding: 12px 18px 18px; display: none; flex-direction: column; gap: 12px; }
+  .sfc-ed-body.open { display: flex; }
+  .sfc-ed-row { display: flex; flex-direction: column; gap: 4px; }
+  .sfc-ed-label { font-size: 11px; color: rgba(255,255,255,.6); font-weight: 500; }
+  .sfc-ed-desc  { font-size: 10px; color: rgba(255,255,255,.35); margin-top: -2px; }
+  .sfc-ed-input {
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 8px; padding: 8px 12px; color: #e0e0e0;
+    font-size: 12px; outline: none; width: 100%;
+    transition: border-color .2s;
+    font-family: 'Roboto Mono', monospace;
+  }
+  .sfc-ed-input:focus { border-color: #14a085; }
+  .sfc-ed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sfc-ed-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
+  .sfc-ed-toggle-label { font-size: 12px; color: rgba(255,255,255,.75); }
+  .sfc-toggle {
+    position: relative; width: 42px; height: 24px;
+    background: rgba(255,255,255,.15); border-radius: 12px; cursor: pointer;
+    transition: background .3s;
+  }
+  .sfc-toggle.on { background: #14a085; }
+  .sfc-toggle::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 18px; height: 18px; border-radius: 50%; background: #fff;
+    transition: transform .3s;
+  }
+  .sfc-toggle.on::after { transform: translateX(18px); }
+  .sfc-color-row { display: flex; align-items: center; gap: 10px; }
+  .sfc-color-swatch { width: 32px; height: 32px; border-radius: 8px; border: 2px solid rgba(255,255,255,.2); cursor: pointer; }
+  .sfc-color-input { flex: 1; }
+  .sfc-ed-number-row { display: flex; align-items: center; gap: 8px; }
+  .sfc-ed-number { width: 80px; text-align: right; }
+  .sfc-ed-slider { flex: 1; accent-color: #14a085; }
+  .sfc-ed-actions {
+    padding: 14px 18px;
+    background: rgba(0,0,0,.3);
+    display: flex; gap: 10px; justify-content: flex-end;
+  }
+  .sfc-ed-btn {
+    padding: 8px 20px; border-radius: 20px; border: none; cursor: pointer;
+    font-size: 12px; font-weight: 700; letter-spacing: .5px;
+    transition: all .2s;
+  }
+  .sfc-ed-btn.primary { background: #14a085; color: #fff; }
+  .sfc-ed-btn.primary:hover { background: #0d7377; }
+  .sfc-ed-btn.secondary { background: rgba(255,255,255,.1); color: rgba(255,255,255,.7); }
+  .sfc-ed-btn.secondary:hover { background: rgba(255,255,255,.18); }
+  .sfc-ed-info {
+    background: rgba(20,160,133,.1); border: 1px solid rgba(20,160,133,.3);
+    border-radius: 8px; padding: 10px 12px; font-size: 11px; color: rgba(255,255,255,.6);
+    line-height: 1.6;
+  }
+  .sfc-ed-info strong { color: #14a085; }
+  /* En mode single, les labels flottent au-dessus de l'image */
+  .sfc-energy-row .sfc-img-node .sfc-img-label,
+  .sfc-energy-row .sfc-img-node .sfc-img-val,
+  .sfc-energy-row .sfc-img-node .sfc-img-sub {
+    text-shadow: 0 1px 6px rgba(0,0,0,0.9), 0 0 12px rgba(0,0,0,0.8);
+    background: rgba(6,13,26,0.45);
+    border-radius: 4px;
+    padding: 1px 4px;
+  }
+
+  /* Mode single : cache images, spans et labels HTML (remplacés par les SVG text sur l'image) */
+  .sfc-scene-mode-single .sfc-img-node img,
+  .sfc-scene-mode-single .sfc-img-node > span {
+    display: none !important;
+  }
+
+  .sfc-scene-mode-single .sfc-img-label,
+  .sfc-scene-mode-single .sfc-img-val,
+  .sfc-scene-mode-single .sfc-img-sub {
+    display: none !important;
+  }
+
+  /* Mode single : masquer les nœuds routeurs HTML (remplacés par les chemins SVG overlay) */
+  .sfc-scene-mode-single #sfcRouterNode1,
+  .sfc-scene-mode-single #sfcRouterNode2,
+  .sfc-scene-mode-single #sfcRouterNode3,
+  .sfc-scene-mode-single #sfcRouterNode4 {
+    display: none !important;
+  }
+
+  /* Mode single : la rangée de nœuds HTML est purement décorative (libellés dessinés sur
+     l'image) et couvre le bas de la scène en z-index 3. Sans ceci elle capte les clics et
+     masque les zones cliquables SVG du bas (réseau, batterie, spa, EV…). On la rend
+     transparente aux événements → les clics atteignent les hit-rects de #sfcSingleFlowSvg. */
+  .sfc-energy-row.sfc-scene-mode-single { pointer-events: none; }
+
+  /* Mode single : lever/coucher affichés dans le SVG global (masquer les HTML) */
+  .sfc-scene-mode-single-scene .sfc-sunrise,
+  .sfc-scene-mode-single-scene .sfc-sunset {
+    display: none !important;
+  }
+  
+  /* Mode single : masquer les SVG de flux + arc standards (remplacés par sfcSingleFlowSvg) */
+  .sfc-scene-mode-single-scene #sfcFlowSvg,
+  .sfc-scene-mode-single-scene .sfc-sun-flow,
+  .sfc-scene-mode-single-scene .sfc-sun-arc-svg {
+    display: none;
+  }
+
+  /* Mode single : masquer le widget batterie HTML (remplacé par la batterie SVG) */
+  .sfc-scene-mode-single-scene #sfcBattWrapper {
+    display: none !important;
+  }
+
+  /* Vagues SVG supprimées — artefact visuel à cette échelle, remplacées par bulles GSAP */
+  #sfcSVBattWave1, #sfcSVBattWave2 { display: none !important; }
+
+  /* Charge (vert pulsé, comme .sfc-batt-charge) */
+  #sfcSVBattFill.sv-charging {
+    animation: sfcSVBattCharge 2s ease-in-out infinite;
+  }
+  /* Batterie faible (rouge clignotant, comme .sfc-batt-low) */
+  #sfcSVBattFill.sv-low {
+    animation: sfcSVBattLow 1s ease-in-out infinite;
+  }
+  @keyframes sfcSVBattCharge { 0%,100% { filter: brightness(1); }  50% { filter: brightness(1.3); } }
+  @keyframes sfcSVBattLow    { 0%,100% { opacity: 1; }             50% { opacity: 0.55; } }
+
+  /* Mode single : la batterie reste dans le flux flex normal */
+  .sfc-scene-mode-single .node-battery {
+    flex: 1;
+    left: 41px;
+    top: -37px;
+  }
+
+  /* Mode single : remonte les valeurs de la maison */
+  .sfc-scene-mode-single #sfcNodeHome {
+    transform: translateY(-250%);
+  }
+`;
+
+// ══════════════════════════════════════════════════════════
+//  CARD HTML TEMPLATE
+// ══════════════════════════════════════════════════════════
+// Construit le HTML complet de la carte : scène (mode single/séparé), barres %, et toutes les
+// sections (PV, conso, batterie, santé, routeurs, économies, EV) assemblées selon section_order.
+// ══════════════════════════════════════════════════════════
+//  SCÈNE SINGLE : POSITIONS RÉGLABLES (scene_layout)
+// ══════════════════════════════════════════════════════════
+// Repère = pixels de l'image de fond (viewBox 1536×1024). Toute clé absente de
+// scene_layout garde la position d'origine, calée sur l'image fournie avec la carte.
+// Flux = liste de points [x, y] du départ à l'arrivée · badge = [centre x, bord haut y]
+// battery_gauge = coin haut-gauche du cylindre (75×115), ou false pour le masquer.
+const SCENE_LAYOUT_DEFAULTS = {
+  flow_sun:      [[790, 15.5], [790, 224.5]],
+  flow_grid:     [[426, 915.5], [860.5, 704.5], [579, 660.5], [748, 608]],
+  flow_battery:  [[945, 623.5], [1402, 639.5]],
+  flow_router1:  [[718, 608], [544, 660.5], [417.5, 646.5], [364.5, 660.5]],
+  flow_router2:  [[865.5, 597.5], [865.5, 514.5], [1333.5, 514.5]],
+  flow_ev:       [[916.5, 597.5], [1140, 597.5]],
+  badge_grid:    [210, 836],
+  badge_battery: [1414, 686],
+  badge_router1: [195, 562],
+  badge_router2: [1268, 330],
+  badge_ev:      [1101, 678],
+  battery_gauge: [1420, 500],
+};
+const _slPoint  = p => Array.isArray(p) && p.length === 2 && p.every(n => Number.isFinite(Number(n)));
+const _slPoints = a => Array.isArray(a) && a.length >= 2 && a.every(_slPoint);
+function sceneLayout(c) {
+  const user = (c && c.scene_layout && typeof c.scene_layout === 'object') ? c.scene_layout : {};
+  const out = {};
+  for (const [k, def] of Object.entries(SCENE_LAYOUT_DEFAULTS)) {
+    const v = user[k];
+    if (k === 'battery_gauge' && v === false) out[k] = false;
+    else if (k.startsWith('flow_')) out[k] = _slPoints(v) ? v.map(q => [Number(q[0]), Number(q[1])]) : def;
+    else out[k] = _slPoint(v) ? [Number(v[0]), Number(v[1])] : def;
+  }
+  return out;
+}
+// Chemin SVG d'un flux ; reverse = sens inverse (export réseau, décharge, V2H)
+function scenePath(points, reverse) {
+  const pts = reverse ? [...points].reverse() : points;
+  return 'M' + pts.map(q => q[0] + ' ' + q[1]).join(' L');
+}
+
+function buildCardHTML(cfg) {
+  const c = { ...DEFAULTS, ...cfg };
+  const showBars    = c.show_progress_bars;
+  const showInv     = c.show_inverter;
+  const showEnd     = c.show_endurance;
+  const showSavings = c.show_savings !== false;
+  const showHealth  = c.show_health !== false;
+  const showAuto    = c.show_autoconso !== false && c.pv_today;
+  const showCells= c.show_cells;
+  // Bilan & Performance : visible si au moins une donnée d'énergie du jour est disponible
+  const showBalance = c.show_balance !== false &&
+    (c.pv_today || c.today_load || c.grid_import_today || c.grid_export_today || c.batt_chg_today || c.batt_dis_today);
+  // Mode single : sous-lignes d'énergie du jour sur les chips de la scène
+  const secSc = c.show_scene_secondary === true;
+
+  // [PATCH maison 04/08/2026] Badge libre pour le routeur 3, positionnable depuis le YAML.
+  // Raison : en mode scène unifiée, la v1.3.1 ne dessine que 2 badges routeurs, à des
+  // positions codées en dur — router1 sur le spa (x=195), router2 sur le garage (x=1268).
+  // Le poêle à pellet du salon (x≈528) n'a aucun slot. Ce badge comble ce manque sans
+  // occuper le slot du spa, qui reste disponible pour le vrai spa à venir.
+  // Repère = pixels de l'image de fond (viewBox 1536x1024).
+  // router3_x = centre horizontal · router3_y = bord HAUT du cadre visible.
+  const r3x = Number(c.router3_x) || 560;
+  const r3y = Number(c.router3_y) || 600;
+  // router3_hide_power: true → on masque la ligne de watts (cas du poêle à granulés, qui ne
+  // consomme pas le solaire : seule la température a du sens). La température prend alors la
+  // place de la valeur, en grand, et le cadre reprend la hauteur d'un badge à une ligne.
+  const r3pwr = c.router3_hide_power !== true;
+  const r3h   = (c.router3_temp && r3pwr) ? 142 : 108;
+  // [PATCH maison] Badge MAISON déplaçable. Défauts = positions d'origine de la v1.3.1.
+  const hx = Number(c.home_x) || 720;
+  const hy = Number(c.home_y) || 387;
+  // Positions de la scène single (scene_layout) : flux, badges, jauge batterie
+  const L = sceneLayout(c);
+  const [gx, gy]   = L.badge_grid;      // badge RÉSEAU    : centre x / bord haut
+  const [bx, by]   = L.badge_battery;   // badge BATTERIE
+  const [s1x, s1y] = L.badge_router1;   // badge SPA (routeur 1)
+  const [s2x, s2y] = L.badge_router2;   // badge ECS (routeur 2)
+  const [evx, evy] = L.badge_ev;        // badge VOITURE
+  const bg = L.battery_gauge;           // jauge batterie : coin haut-gauche, ou false
+
+  return `
+  <div class="sfc-root ${c.details_on_click !== false ? 'sfc-clickable' : ''}" id="sfcRoot" style="
+    --sfc-solar:${c.color_solar};
+    --sfc-grid:${c.color_grid};
+    --sfc-batt:${c.color_battery};
+    --sfc-home:${c.color_home};
+    --sfc-ev:${c.color_ev || '#4FC3F7'};
+    --sfc-bg:${c.color_bg};
+    --sfc-sf:${c.scale_flux  || 1};
+    --sfc-sl:${c.scale_label || 1};
+    --sfc-sv:${c.scale_value || 1};
+  ">
+    <!-- HEADER -->
+    <div class="sfc-header">
+      <div class="sfc-title-row">
+        <span style="font-size:18px;animation:sfc-blink 3s infinite;">⚡</span>
+        <span class="sfc-title">${c.title}</span>
+        <span class="sfc-badge idle" id="sfcStatus">IDLE</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="sfc-weather">
+          <span id="sfcWIcon">☀️</span>
+          <span class="sfc-weather-temp" id="sfcWTemp">—°C</span>
+        </div>
+        <div class="sfc-live-dot"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════
+         SCÈNE UNIFIÉE : ciel + soleil + énergie
+    ════════════════════════════════════════════ -->
+    <div class="sfc-unified-scene ${c.img_scene_mode === 'single' && c.show_images !== false ? 'sfc-scene-mode-single-scene' : ''} ${c.img_scene_mode === 'single' && c.show_images !== false && c.sky_canvas !== false ? 'sfc-sky-canvas' : ''}" id="sfcUnifiedScene"
+         style="${c.show_images === false ? 'height:355px' : (c.img_scene_mode === 'single' ? (c.scene_max_height ? /* [PATCH maison 29/08/2026] scene_max_height : la scene est dimensionnee par sa HAUTEUR (et non par la largeur), donc elle tient toujours dans l'ecran quel que soit l'appareil. Sans ca, width:100% impose height = largeur/1.28, ce qui deborde en bas sur une tablette 1280x800 et coupe RESEAU/BATTERIE (ancres en bas de #sfcUnifiedScene). */ ('aspect-ratio:1536/1200;height:' + c.scene_max_height + ';width:auto;max-width:100%;margin:0 auto') : (c.scene_full_width ? 'aspect-ratio:1536/1200;width:100%' : 'aspect-ratio:11/10;max-height:490px')) : 'height:355px')};">
+
+      <!-- Fond ciel dynamique -->
+      <div class="sfc-sky" id="sfcSky"></div>
+      ${c.img_scene_mode === 'single' && c.show_images !== false && c.sky_canvas !== false
+        ? `<canvas class="sfc-sky-canvas-bg" id="sfcSkyCanvasBg"></canvas>` : ''}
+
+      <!-- Étoiles (nuit) -->
+      <div class="sfc-stars" id="sfcStars" style="opacity:0;"></div>
+
+      <!-- Nuages CSS — voile atmosphérique (toutes conditions nuageuses) -->
+      <div class="sfc-clouds" id="sfcClouds">
+        <div class="sfc-cloud-shape" style="width:160px;height:35px;top:12%;animation-duration:65s;animation-delay:0s;opacity:0.5;"></div>
+        <div class="sfc-cloud-shape" style="width:110px;height:25px;top:22%;animation-duration:85s;animation-delay:-20s;opacity:0.35;"></div>
+        <div class="sfc-cloud-shape" style="width:200px;height:40px;top:8%;animation-duration:100s;animation-delay:-40s;opacity:0.4;"></div>
+      </div>
+
+      <!-- Nuages distincts — partiellement nuageux uniquement -->
+      <div class="sfc-partly-clouds" id="sfcPartlyClouds">
+        <!-- Cluster 1 : gros cumulus gauche -->
+        <div class="sfc-cloud-puff" style="width:290px;height:70px;top:7%;animation-duration:78s;animation-delay:-8s;opacity:0.82;"></div>
+        <div class="sfc-cloud-puff" style="width:200px;height:58px;top:5%;animation-duration:78s;animation-delay:-8s;opacity:0.6;left:50px;"></div>
+        <div class="sfc-cloud-puff" style="width:160px;height:50px;top:9%;animation-duration:78s;animation-delay:-8s;opacity:0.5;left:110px;"></div>
+        <!-- Cluster 2 : nuage moyen centre-droite -->
+        <div class="sfc-cloud-puff" style="width:240px;height:58px;top:19%;animation-duration:95s;animation-delay:-38s;opacity:0.75;"></div>
+        <div class="sfc-cloud-puff" style="width:170px;height:50px;top:17%;animation-duration:95s;animation-delay:-38s;opacity:0.55;left:40px;"></div>
+        <!-- Cluster 3 : petit nuage haut-droite -->
+        <div class="sfc-cloud-puff" style="width:190px;height:48px;top:11%;animation-duration:60s;animation-delay:-25s;opacity:0.7;"></div>
+        <div class="sfc-cloud-puff" style="width:130px;height:42px;top:9%;animation-duration:60s;animation-delay:-25s;opacity:0.5;left:35px;"></div>
+      </div>
+
+      <!-- Effets météo (pluie / neige / foudre) -->
+      <div class="sfc-weather-fx" id="sfcRain" style="display:none;"></div>
+      <div class="sfc-weather-fx" id="sfcSnow" style="display:none;"></div>
+      <div class="sfc-lightning-fx" id="sfcLightningFx" style="display:none;"></div>
+      ${c.img_scene_mode === 'single' && c.show_images !== false && c.sky_canvas !== false
+        ? `<canvas class="sfc-sky-canvas-fg" id="sfcSkyCanvasFg"></canvas>` : ''}
+
+      <!-- Arc de trajectoire solaire -->
+      <svg class="sfc-sun-arc-svg" viewBox="0 0 520 200" preserveAspectRatio="xMidYMid meet"
+           style="height:40%;top:0;left:0;right:0;position:absolute;z-index:3;">
+        <path class="sfc-sun-arc-bg" d="M 40,175 Q 260,10 480,175" fill="none" stroke="rgba(255,215,0,0.22)" stroke-width="1.2" />
+        <path id="sfcArcDone" class="sfc-sun-arc-active" d="M 40,175 Q 260,10 480,175" fill="none" stroke="rgba(255,215,0,0.78)" stroke-width="2.2"
+          stroke-dasharray="1000" stroke-dashoffset="1000" style="transition:stroke-dashoffset 20s ease;"/>
+        <defs>
+          <radialGradient id="sfcGlowGrad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="rgba(255,200,0,.22)"/>
+            <stop offset="100%" stop-color="rgba(255,200,0,0)"/>
+          </radialGradient>
+        </defs>
+        <ellipse id="sfcGlowEl" cx="260" cy="90" rx="55" ry="38" fill="url(#sfcGlowGrad)" style="transition:all 20s ease;"/>
+      </svg>
+      
+      <svg class="sfc-sun-flow" viewBox="0 0 520 380" preserveAspectRatio="none"
+             style="position:absolute;inset:0;pointer-events:none;z-index:5">
+          
+          <path id="sfcSunFlowLine"
+            class="sfc-sun-flow-core"
+            d="M 260,140 L 260,320"
+            stroke="#FFD700"
+            style="--flow-color:#FFD700"
+            fill="none"/>
+          <path id="sfcSunFlowTailLong"
+            class="sfc-sun-flow-tail-long"
+            d="M 260,140 L 260,320"
+            stroke="#FFD700"
+            style="--flow-color:#FFD700"
+            fill="none"/>
+          <path id="sfcSunFlowTailMid"
+            class="sfc-sun-flow-tail-mid"
+            d="M 260,140 L 260,320"
+            stroke="#FFD700"
+            style="--flow-color:#FFD700"
+            fill="none"/>
+          <path id="sfcSunFlowGlow"
+            class="sfc-sun-flow-neon"
+            d="M 260,140 L 260,320"
+            stroke="#FFD700"
+            style="--flow-color:#FFD700"
+            fill="none"/>
+        </svg>
+
+      <!-- Soleil -->
+      <div class="sfc-sun-orb" id="sfcSunOrb" style="left:50%;top:10%;opacity:1;">
+        <div class="sfc-sun-inner" id="sfcSunInner"></div>
+      </div>
+
+      <!-- Lune (nuit uniquement) -->
+      <div id="sfcMoonOrb" style="
+        position:absolute;
+        font-size:32px;
+        transform:translate(-50%,-50%);
+        transition:left 20s ease, top 20s ease;
+        z-index:2;
+        pointer-events:none;
+        display:none;
+        filter:drop-shadow(0 0 12px rgba(200,220,255,0.6));
+        text-shadow:0 0 20px rgba(180,200,255,0.8);
+      ">🌙</div>
+
+      <!-- Badge PV -->
+      <div class="sfc-pv-badge" data-detail="pv"${c.pv_badge_top ? ` style="top:${c.pv_badge_top}"` : ''}><!-- [PATCH maison 19/10/2026] pv_badge_top : descend le badge kW sous le soleil -->
+        <span>☀️</span>
+        <span class="sfc-pv-val" id="sfcPvBig">0 W</span>
+      </div>
+
+      <!-- Prévision de production (top-left, si configurée) -->
+      ${c.pv_forecast_today ? `
+      <div class="sfc-forecast-badge" id="sfcForecastBadge">
+        <span class="sfc-forecast-today"  id="sfcForecastToday">📊 — kWh</span>
+        ${c.pv_forecast_tomorrow ? `<span class="sfc-forecast-tomorrow" id="sfcForecastTomorrow">↪ — kWh</span>` : ''}
+      </div>` : ''}
+
+      <!-- Heure + élévation -->
+      <div class="sfc-sun-time" id="sfcSunTime">12:00 · 45°</div>
+
+      <!-- Labels lever / coucher -->
+      <div class="sfc-sunrise" id="sfcSunrise">🌅 06:00</div>
+      <div class="sfc-sunset"  id="sfcSunset">🌇 21:00</div>
+
+      <!-- SVG lignes de flux vers routeurs (overlay sur toute la scène) -->
+      ${(c.router1_enabled || c.router2_enabled || c.router3_enabled || c.router4_enabled) ? `
+      <svg class="sfc-router-svg" id="sfcRouterSvg"
+           style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4;"
+           viewBox="0 0 520 380" preserveAspectRatio="none">
+        <path id="sfcRouterLine1" class="sfc-router-line" d="M 260,300 L 260,200"/>
+        <path id="sfcRouterLine2" class="sfc-router-line" d="M 260,300 L 130,200"/>
+        <path id="sfcRouterLine3" class="sfc-router-line" d="M 260,300 L 390,200"/>
+        <path id="sfcRouterLine4" class="sfc-router-line" d="M 260,300 L 460,200"/>
+      </svg>` : ''}
+
+      <!-- Plan d'eau + sol -->
+      ${c.show_images !== false ? `
+        <div class="sfc-ground"></div>
+        <div class="sfc-water"></div>
+        <div class="sfc-water-line"></div>
+      ` : ''}
+
+      <!-- ── ZONE ÉNERGIE (images ou émojis) ── -->
+      ${c.show_images !== false ? `
+      <!-- Image scène unique (jour/nuit) — placée sous les flux -->
+      ${c.img_scene_mode === 'single' ? `
+      <div class="sfc-scene-image-wrap">
+        <!--
+          SVG overlay calé sur l'image de scène (1536×1024 px).
+          preserveAspectRatio="xMidYMax meet" est identique au transform appliqué par
+          object-fit:contain + object-position:bottom center → les deux scalent ensemble
+          pixel par pixel quelle que soit la largeur de la card.
+          stroke-width en unités 1536 : à ~516px de card, 1 unité ≈ 0.34 px
+          → core≈3, neon≈3.6, tail-mid≈4.8, tail-long≈6.5
+        -->
+        <svg id="sfcSingleFlowSvg"
+          style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;"
+          viewBox="0 0 1536 1024"
+          preserveAspectRatio="xMidYMax meet">
+
+          <defs>
+            <!-- Clip cylindre batterie -->
+            <clipPath id="sfcSVBattClip">
+              <rect x="${bg ? bg[0] + 2 : 1422}" y="${bg ? bg[1] + 2 : 502}" width="71" height="110" rx="4"/>
+            </clipPath>
+            <!-- Gradients liquide selon état — même logique que le mode séparé HTML -->
+            <linearGradient id="sfcSVGradNeutral"   x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stop-color="rgba(0,220,255,0.9)"/>
+              <stop offset="100%" stop-color="rgba(0,100,220,1)"/>
+            </linearGradient>
+            <linearGradient id="sfcSVGradCharge"    x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stop-color="rgba(105,255,71,0.9)"/>
+              <stop offset="40%"  stop-color="rgba(0,200,100,1)"/>
+              <stop offset="100%" stop-color="rgba(0,140,60,1)"/>
+            </linearGradient>
+            <linearGradient id="sfcSVGradDischarge" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stop-color="rgba(255,180,0,0.9)"/>
+              <stop offset="40%"  stop-color="rgba(255,100,0,1)"/>
+              <stop offset="100%" stop-color="rgba(200,50,0,1)"/>
+            </linearGradient>
+            <linearGradient id="sfcSVGradLow"       x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stop-color="rgba(255,80,80,0.9)"/>
+              <stop offset="100%" stop-color="rgba(200,20,20,1)"/>
+            </linearGradient>
+            <!-- Gradient dynamique : couleur selon le niveau de batterie (stops mis à jour en JS) -->
+            <linearGradient id="sfcSVGradLevel"     x1="0" y1="0" x2="0" y2="1">
+              <stop id="sfcSVGradLevelTop" offset="0%"   stop-color="rgba(0,220,255,0.92)"/>
+              <stop id="sfcSVGradLevelBot" offset="100%" stop-color="rgb(0,90,150)"/>
+            </linearGradient>
+            <!-- Vagues claires : fondu vers transparent vers le bas (pas de bord plat visible) -->
+            <linearGradient id="sfcSVWaveGradB" x1="0" y1="0" x2="0" y2="1">
+              <stop id="sfcSVWaveGradBTop" offset="0%"  stop-color="rgba(255,255,255,0.85)"/>
+              <stop id="sfcSVWaveGradBBot" offset="100%" stop-color="rgba(255,255,255,0)"/>
+            </linearGradient>
+            <linearGradient id="sfcSVWaveGradC" x1="0" y1="0" x2="0" y2="1">
+              <stop id="sfcSVWaveGradCTop" offset="0%"  stop-color="rgba(255,255,255,0.80)"/>
+              <stop id="sfcSVWaveGradCBot" offset="100%" stop-color="rgba(255,255,255,0)"/>
+            </linearGradient>
+            <!-- Halo solaire (mode single) -->
+            <radialGradient id="sfcGlowGradS" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"   stop-color="rgba(255,200,0,0.28)"/>
+              <stop offset="100%" stop-color="rgba(255,200,0,0)"/>
+            </radialGradient>
+          </defs>
+
+          <!-- ── ARC TRAJECTOIRE SOLAIRE (calé sur l'image, coords Figma) ── -->
+          <path class="sfc-sun-arc-bg" d="M127 150 C544 -95.5 999 -95.5 1416 150"
+            fill="none" stroke="rgba(255,215,0,0.22)" stroke-width="3" stroke-linecap="round"/>
+          <path id="sfcArcDone_s" class="sfc-sun-arc-active" d="M127 150 C544 -95.5 999 -95.5 1416 150"
+            fill="none" stroke="rgba(255,215,0,0.78)" stroke-width="5" stroke-linecap="round"
+            style="transition:stroke-dashoffset 20s ease;filter:drop-shadow(0 0 10px rgba(255,215,0,0.35))"/>
+          <ellipse id="sfcGlowEl_s" cx="760" cy="20" rx="150" ry="100" fill="url(#sfcGlowGradS)" style="transition:all 20s ease;"/>
+
+          <!-- Lever / coucher — extrémités de l'arc -->
+          <text id="sfcSGSunrise" text-anchor="start" x="120" y="215"
+            style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:600;fill:rgba(232,244,253,0.65)">🌅 —</text>
+          <text id="sfcSGSunset"  text-anchor="end"   x="1416" y="215"
+            style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:600;fill:rgba(232,244,253,0.65)">— 🌇</text>
+
+          <!-- ── FLUX Soleil → Maison (rayon ciel, coords Figma M790 15.5 V224.5) ── -->
+          <path id="sfcSunFlowLine_s"     class="sfc-sun-flow-core"     stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_sun)}"/>
+          <path id="sfcSunFlowTailLong_s" class="sfc-sun-flow-tail-long" stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_sun)}"/>
+          <path id="sfcSunFlowTailMid_s"  class="sfc-sun-flow-tail-mid"  stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_sun)}"/>
+          <path id="sfcSunFlowGlow_s"     class="sfc-sun-flow-neon"      stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_sun)}"/>
+
+          <!-- ── FLUX Grid ↔ Maison ── -->
+          <path id="sfcLG_s"         class="sfc-flow-core"      stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_grid)}"/>
+          <path id="sfcLGTailLong_s" class="sfc-flow-tail-long" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_grid)}"/>
+          <path id="sfcLGTailMid_s"  class="sfc-flow-tail-mid"  stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_grid)}"/>
+          <path id="sfcLGGlow_s"     class="sfc-flow-neon"      stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_grid)}"/>
+
+          <!-- ── FLUX Maison ↔ Batterie ── -->
+          <path id="sfcLB_s"         class="sfc-flow-core"      stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_battery)}"/>
+          <path id="sfcLBTailLong_s" class="sfc-flow-tail-long" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_battery)}"/>
+          <path id="sfcLBTailMid_s"  class="sfc-flow-tail-mid"  stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_battery)}"/>
+          <path id="sfcLBGlow_s"     class="sfc-flow-neon"      stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_battery)}"/>
+
+          <!-- ── FLUX Maison → Spa (router1) ── -->
+          ${c.router1_enabled ? `
+          <path id="sfcLSpa_s"         class="sfc-flow-core"      stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_router1)}"/>
+          <path id="sfcLSpaTailLong_s" class="sfc-flow-tail-long" stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_router1)}"/>
+          <path id="sfcLSpaTailMid_s"  class="sfc-flow-tail-mid"  stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_router1)}"/>
+          <path id="sfcLSpaGlow_s"     class="sfc-flow-neon"      stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_router1)}"/>
+          ` : ''}
+
+          <!-- ── FLUX Maison → ECS (router2) ── -->
+          ${c.router2_enabled ? `
+          <path id="sfcLECS_s"         class="sfc-flow-core"      stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_router2)}"/>
+          <path id="sfcLECSTailLong_s" class="sfc-flow-tail-long" stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_router2)}"/>
+          <path id="sfcLECSTailMid_s"  class="sfc-flow-tail-mid"  stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_router2)}"/>
+          <path id="sfcLECSGlow_s"     class="sfc-flow-neon"      stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_router2)}"/>
+          ` : ''}
+
+          <!-- ── FLUX Maison ↔ EV (bidirectionnel : charge / V2H) ── -->
+          ${c.ev_enabled ? `
+          <path id="sfcLEV_s"         class="sfc-flow-core"      stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_ev)}"/>
+          <path id="sfcLEVTailLong_s" class="sfc-flow-tail-long" stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_ev)}"/>
+          <path id="sfcLEVTailMid_s"  class="sfc-flow-tail-mid"  stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_ev)}"/>
+          <path id="sfcLEVGlow_s"     class="sfc-flow-neon"      stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_ev)}"/>
+          ` : ''}
+
+          <!-- ══════════════════════════════════════════════════════════
+               BATTERIE LIQUIDE SVG — overlay sur la batterie murale de l'image.
+               Coords 1536×1024 : batterie mur droit garage ~X=1462, Y=500.
+               La hauteur du liquide (sfcSVBattFill) est mise à jour via JS.
+               clipPath sfcSVBattClip découpe proprement dans le cylindre.
+          ══════════════════════════════════════════════════════════ -->
+          <!-- Fond cylindre — ajuster x/y pour aligner sur la batterie murale de l'image.
+               Référence : image 1536×1024, batterie mur droit garage.
+               Pour décaler : modifier x (gauche/droite) et y (haut/bas) sur tous les éléments. -->
+${bg ? `
+          <rect x="${bg[0]}" y="${bg[1]}" width="75" height="115" rx="6"
+            fill="rgba(6,13,26,0.78)" stroke="rgba(255,255,255,0.18)" stroke-width="2.5"/>
+          <!-- Liquide (bottom-up) — y et height mis à jour par JS -->
+          <rect id="sfcSVBattFill" x="${bg[0] + 2}" y="${bg[1] + 62}" width="71" height="63"
+            fill="url(#sfcSVGradNeutral)" clip-path="url(#sfcSVBattClip)"/>
+          <!-- Vagues de surface animées (gsap.ticker) — suivent le niveau du liquide -->
+          <!-- Ordre DOM = empilement : C (fond) → B → A (1er plan) -->
+          <path id="sfcSVWaveC" clip-path="url(#sfcSVBattClip)" stroke="none"/>
+          <path id="sfcSVWaveB" clip-path="url(#sfcSVBattClip)" stroke="none"/>
+          <path id="sfcSVWaveA" clip-path="url(#sfcSVBattClip)" stroke="none"/>
+          <!-- Vague 1 (lente) — positionnée par GSAP sur la surface du liquide -->
+          <rect id="sfcSVBattWave1" x="${bg[0] - 28}" y="${bg[1] + 110}" width="131" height="14" rx="7"
+            fill="rgba(255,255,255,0.28)" clip-path="url(#sfcSVBattClip)" opacity="0"/>
+          <!-- Vague 2 (rapide, sens inverse) -->
+          <rect id="sfcSVBattWave2" x="${bg[0] - 18}" y="${bg[1] + 110}" width="111" height="10" rx="5"
+            fill="rgba(255,255,255,0.16)" clip-path="url(#sfcSVBattClip)" opacity="0"/>
+          <!-- Brillance gauche -->
+          <rect x="${bg[0] + 2}" y="${bg[1] + 2}" width="14" height="110" rx="2"
+            fill="rgba(255,255,255,0.07)" clip-path="url(#sfcSVBattClip)" pointer-events="none"/>
+          <!-- SOC % centré (Y = top_clip + height/2 = 502 + 55 = 557) -->
+          <text id="sfcSVBattSoc" x="${bg[0] + 38}" y="${bg[1] + 57}"
+            text-anchor="middle" dominant-baseline="middle"
+            style="font-family:monospace;font-size:calc(40px*var(--sfc-sv,1));font-weight:900;fill:#fff;
+                   paint-order:stroke fill;stroke:rgba(0,0,0,0.9);stroke-width:6">—%</text>
+          ` : ''}
+
+          <!-- ══════════════════════════════════════════════════════════
+               LABELS DE PUISSANCE
+               font-size en unités SVG : 1 u ≈ 0.34 px à ~516px de card
+               → label=30 u≈10px, valeur=46 u≈16px, sous-val=34 u≈11px
+          ══════════════════════════════════════════════════════════ -->
+
+          <!-- Spa (router1) — center x=265 -->
+          ${c.router1_enabled ? `
+          <rect x="${s1x - 130}" y="${s1y}" width="260" height="${(c.router1_temp ? 142 : 108) + (secSc ? 42 : 0)}" rx="9"
+            fill="rgba(6,13,26,0.70)" stroke="rgba(255,160,64,0.25)" stroke-width="1.5"/>
+          <rect x="${s1x - 150}" y="${s1y - 45}" width="300" height="${(c.router1_temp ? 232 : 198) + (secSc ? 42 : 0)}" fill="transparent" data-detail="router1" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${s1x}" y="${s1y + 31}"
+            style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
+                   fill:rgba(232,244,253,0.55)">${(c.router1_label||'SPA').toUpperCase()}</text>
+          <text id="sfcSGSpaVal" text-anchor="middle" x="${s1x}" y="${s1y + (c.router1_temp ? 76 : 88)}"
+            style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
+                   fill:${c.router1_color||'#FFA040'};filter:drop-shadow(0 0 4px ${c.router1_color||'#FFA040'})">0 W</text>
+          ${c.router1_temp ? `
+          <text id="sfcSGSpaTemp" text-anchor="middle" x="${s1x}" y="${s1y + 124}"
+            style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));font-weight:600;
+                   fill:#7ecfff;filter:drop-shadow(0 0 3px rgba(126,207,255,0.5))">🌡 — °C</text>
+          ` : ''}
+          ${secSc ? `<text id="sfcSGSpaEnergy" text-anchor="middle" x="${s1x}" y="${s1y + (c.router1_temp ? 164 : 130)}"
+            style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.6)">—</text>` : ''}
+          ` : ''}
+
+          <!-- ECS (router2) — center x=1268 -->
+          ${c.router2_enabled ? `
+          <rect x="${s2x - 135}" y="${s2y}" width="270" height="108" rx="9"
+            fill="rgba(6,13,26,0.70)" stroke="rgba(255,160,64,0.25)" stroke-width="1.5"/>
+          <rect x="${s2x - 155}" y="${s2y - 45}" width="310" height="198" fill="transparent" data-detail="router2" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${s2x}" y="${s2y + 31}"
+            style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
+                   fill:rgba(232,244,253,0.55)">${(c.router2_label||'ECS').toUpperCase()}</text>
+          <text id="sfcSGECSVal" text-anchor="middle" x="${s2x}" y="${s2y + 88}"
+            style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
+                   fill:${c.router2_color||'#FFA040'};filter:drop-shadow(0 0 4px ${c.router2_color||'#FFA040'})">0 W</text>
+          ` : ''}
+
+          <!-- EV — center x=1101, positionné sous le chemin EV -->
+          ${c.ev_enabled ? `
+          <rect x="${evx - 126}" y="${evy}" width="253" height="${c.ev_soc ? '142' : '108'}" rx="9"
+            fill="rgba(6,13,26,0.72)" stroke="rgba(79,195,247,0.28)" stroke-width="1.5"/>
+          <rect x="${evx - 146}" y="${evy - 45}" width="293" height="${c.ev_soc ? '232' : '198'}" fill="transparent" data-detail="ev" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${evx}" y="${evy + 31}"
+            style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
+                   fill:rgba(232,244,253,0.55)">${(c.ev_label||'VOITURE').toUpperCase()}</text>
+          <text id="sfcSGEVPwr" text-anchor="middle" x="${evx}" y="${evy + 88}"
+            style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
+                   fill:#4FC3F7;filter:drop-shadow(0 0 4px #4FC3F7)">0 W</text>
+          ${c.ev_soc ? `<text id="sfcSGEVSoc" text-anchor="middle" x="${evx}" y="${evy + 128}"
+            style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.65)">— %</text>` : ''}
+          ` : ''}
+
+          <!-- Réseau — center x=280 -->
+          <rect x="${gx - 152}" y="${gy}" width="304" height="143" rx="9"
+            fill="rgba(6,13,26,0.70)" stroke="rgba(79,195,247,0.20)" stroke-width="1.5"/>
+          <rect x="${gx - 172}" y="${gy - 45}" width="344" height="233" fill="transparent" data-detail="grid" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${gx}" y="${gy + 31}"
+            style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
+                   fill:rgba(232,244,253,0.55)">${t(c,'node_grid').toUpperCase()}</text>
+          <text id="sfcSGGridVal" text-anchor="middle" x="${gx}" y="${gy + 85}"
+            style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
+                   fill:var(--sfc-grid,#4FC3F7);filter:drop-shadow(0 0 4px var(--sfc-grid,#4FC3F7))">0 W</text>
+          <text id="sfcSGGridSub" text-anchor="middle" x="${gx}" y="${gy + 126}"
+            style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.6)">—</text>
+
+          <!-- Maison — [PATCH maison] position réglable via home_x / home_y (défauts 720 / 387) -->
+          <rect x="${hx - 143}" y="${hy}" width="286" height="${secSc ? '150' : '108'}" rx="9"
+            fill="rgba(6,13,26,0.70)" stroke="rgba(255,107,107,0.20)" stroke-width="1.5"/>
+          <rect x="${hx - 163}" y="${hy - 45}" width="326" height="198" fill="transparent" data-detail="home" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${hx}" y="${hy + 31}"
+            style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
+                   fill:rgba(232,244,253,0.55)">${t(c,'node_home').toUpperCase()}</text>
+          <text id="sfcSGHomeVal" text-anchor="middle" x="${hx}" y="${hy + 88}"
+            style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
+                   fill:var(--sfc-home,#FF6B6B);filter:drop-shadow(0 0 4px var(--sfc-home,#FF6B6B))">0 W</text>
+          ${secSc ? `<text id="sfcSGHomeSub" text-anchor="middle" x="${hx}" y="${hy + 130}"
+            style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.6)">—</text>` : ''}
+
+          <!-- Batterie — center x=1414 -->
+          <rect x="${bx - 145}" y="${by}" width="290" height="143" rx="9"
+            fill="rgba(6,13,26,0.70)" stroke="rgba(105,255,71,0.20)" stroke-width="1.5"/>
+          <rect x="${bx - 165}" y="${by - 45}" width="330" height="233" fill="transparent" data-detail="battery" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${bx}" y="${by + 31}"
+            style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
+                   fill:rgba(232,244,253,0.55)">${t(c,'node_battery').toUpperCase()}</text>
+          <text id="sfcSGBattVal" text-anchor="middle" x="${bx}" y="${by + 85}"
+            style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
+                   fill:var(--sfc-batt,#69FF47);filter:drop-shadow(0 0 4px var(--sfc-batt,#69FF47))">—</text>
+          <text id="sfcSGBattSub" text-anchor="middle" x="${bx}" y="${by + 127}"
+            style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.6)">—</text>
+
+          <!-- [PATCH maison] Routeur 3 — badge LIBRE, placé par router3_x / router3_y.
+               Sert au poêle à pellet : aucun slot natif ne tombe sur le poêle du salon,
+               et le slot router1 doit rester réservé au spa.
+               ⚠️ DESSINÉ EN DERNIER À DESSEIN : sa zone cliquable chevauche celle de MAISON
+               (qui descend jusqu'à y=465). En SVG, le dernier dessiné capte le clic — c'est ce
+               qui garantit qu'un clic sur le badge Pellet ouvre bien le Pellet, pas la Maison. -->
+          ${c.router3_enabled ? `
+          <rect x="${r3x - 130}" y="${r3y}" width="260" height="${r3h}" rx="9"
+            fill="rgba(6,13,26,0.70)" stroke="rgba(255,160,64,0.25)" stroke-width="1.5"/>
+          <rect x="${r3x - 145}" y="${r3y - 18}" width="290" height="${r3h + 110}"
+            fill="transparent" data-detail="router3" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${r3x}" y="${r3y + 31}"
+            style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
+                   fill:rgba(232,244,253,0.55)">${(c.router3_label||'ROUTEUR 3').toUpperCase()}</text>
+          ${r3pwr ? `
+          <text id="sfcSGR3Val" text-anchor="middle" x="${r3x}" y="${r3y + (c.router3_temp ? 76 : 88)}"
+            style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
+                   fill:${c.router3_color||'#FFA040'};filter:drop-shadow(0 0 4px ${c.router3_color||'#FFA040'})">0 W</text>
+          ` : ''}
+          ${c.router3_temp ? `
+          <text id="sfcSGR3Temp" text-anchor="middle" x="${r3x}" y="${r3y + (r3pwr ? 124 : 84)}"
+            style="font-family:monospace;font-size:calc(${r3pwr ? 34 : 44}px*var(--sfc-sv,1));font-weight:${r3pwr ? 600 : 700};
+                   fill:#7ecfff;filter:drop-shadow(0 0 3px rgba(126,207,255,0.5))">🌡 — °C</text>
+          ` : ''}
+          ` : ''}
+        </svg>
+        <img class="sfc-scene-image" id="sfcSceneImg"
+          src="${(c[`img_scene_day_${(c.img_scene_variant||'esc_ev').replace(/^esc_/, '')}`] || c.img_scene_day || '')}"
+          alt="scene" onerror="this.style.display='none'"/>
+      </div>
+      ` : ''}
+      <div class="sfc-energy-row ${c.img_scene_mode === 'single' ? 'sfc-scene-mode-single' : ''}" id="sfcEnergyRow">
+
+        <!-- Lignes de flux SVG (dynamiques via JS) -->
+        <svg class="sfc-flow-svg" id="sfcFlowSvg" viewBox="0 0 420 100" preserveAspectRatio="none">
+          <defs>
+            <marker id="arrowGrid" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="var(--sfc-grid,#4FC3F7)"/>
+            </marker>
+            <marker id="arrowGridRev" markerWidth="7" markerHeight="7" refX="2" refY="3" orient="auto">
+              <path d="M8,0 L8,6 L0,3 z" fill="var(--sfc-grid,#4FC3F7)"/>
+            </marker>
+            <marker id="arrowBatt" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="var(--sfc-batt,#69FF47)"/>
+            </marker>
+            <marker id="arrowDis" markerWidth="7" markerHeight="7" refX="2" refY="3" orient="auto">
+              <path d="M8,0 L8,6 L0,3 z" fill="var(--sfc-batt,#69FF47)"/>
+            </marker>
+            <marker id="arrowRouter" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#FFA040"/>
+            </marker>
+            <!-- Gradient flux grid (bleu cyan) -->
+            <linearGradient id="sfcGradGrid" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%"   stop-color="#00FFFF" stop-opacity="0"/>
+              <stop offset="40%"  stop-color="#4FC3F7"/>
+              <stop offset="100%" stop-color="#4FC3F7" stop-opacity="0"/>
+            </linearGradient>
+
+            <!-- Gradient flux batterie (vert néon) -->
+            <linearGradient id="sfcGradBatt" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%"   stop-color="#69FF47" stop-opacity="0"/>
+              <stop offset="40%"  stop-color="#00FF88"/>
+              <stop offset="100%" stop-color="#69FF47" stop-opacity="0"/>
+            </linearGradient>
+
+            <!-- Gradient flux soleil (or→blanc) -->
+            <linearGradient id="sfcGradSun" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%"   stop-color="#FFD700"/>
+              <stop offset="60%"  stop-color="#FFAA00"/>
+              <stop offset="100%" stop-color="#FFD700" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <!-- Tube réseau↔maison : base pleine + traînée néon -->
+          <path id="sfcLG" class="sfc-flow-core" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7)" d="M 65,40 L 195,40"/>
+          <path id="sfcLGTailLong" class="sfc-flow-tail-long" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7)" d="M 65,40 L 195,40"/>
+          <path id="sfcLGTailMid" class="sfc-flow-tail-mid" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7)" d="M 65,40 L 195,40"/>
+          <path id="sfcLGGlow" class="sfc-flow-neon" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7)" d="M 65,40 L 195,40"/>
+
+          <path id="sfcLB" class="sfc-flow-core" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47)" d="M 225,40 L 355,40" marker-end="url(#arrowBatt)"/>
+          <path id="sfcLBTailLong" class="sfc-flow-tail-long" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47)" d="M 225,40 L 355,40"/>
+          <path id="sfcLBTailMid" class="sfc-flow-tail-mid" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47)" d="M 225,40 L 355,40"/>
+          <path id="sfcLBGlow" class="sfc-flow-neon" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47)" d="M 225,40 L 355,40"/>
+          <path id="sfcLR1" class="sfc-router-line" d="M 210,40 L 280,40" marker-end="url(#arrowRouter)" style="display:none"/>
+          <path id="sfcLR2" class="sfc-router-line" d="M 210,40 L 310,40" marker-end="url(#arrowRouter)" style="display:none"/>
+          <path id="sfcLR3" class="sfc-router-line" d="M 210,40 L 340,40" marker-end="url(#arrowRouter)" style="display:none"/>
+          <path id="sfcLR4" class="sfc-router-line" d="M 210,40 L 350,40" marker-end="url(#arrowRouter)" style="display:none"/>
+        </svg>
+
+        <!-- ── RÉSEAU ── -->
+        <div class="sfc-img-node node-grid" id="sfcNodeGrid" data-detail="grid">
+          <img src="${c.img_grid || '/local/solar-flow-card/img/grid.png'}" alt="grid"
+            onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
+          <span style="display:none;font-size:36px;">🌐</span>
+          <div class="sfc-img-label">${t(c,"node_grid")}</div>
+          <div class="sfc-img-val c-grid" id="sfcGrid">0 W</div>
+          <div class="sfc-img-sub" id="sfcGridDir">—</div>
+        </div>
+
+        <!-- ── MAISON (toujours centrale, plus grande) ── -->
+        <div class="sfc-img-node node-home" id="sfcNodeHome" style="flex:1.6;" data-detail="home">
+          <img src="${c.img_house || '/local/solar-flow-card/img/house.png'}" alt="home"
+            onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
+          <span style="display:none;font-size:44px;">🏠</span>
+          <div class="sfc-img-label">${t(c,"node_home")}</div>
+          <div class="sfc-img-val c-home" id="sfcHome">0 W</div>
+        </div>
+
+        <!-- ── ROUTEURS (si activés, entre maison et batterie) -->
+        <!-- Mode 'sum' : un seul nœud additionné -->
+        ${c.router_scene_mode === 'sum' && (c.router1_enabled || c.router2_enabled || c.router3_enabled || c.router4_enabled) ? `
+        <div class="sfc-img-node" id="sfcRouterNodeSum" style="flex:0.85;">
+          <span style="font-size:30px;">⚡</span>
+          <div class="sfc-router-label">${t(c,'section_routers')}</div>
+          <div class="sfc-router-val inactive" id="sfcRouterSumVal">0 W</div>
+        </div>` : ''}
+        <!-- Mode 'spread' (défaut) : un nœud par routeur -->
+        ${c.router_scene_mode !== 'sum' && c.router1_enabled ? `
+        <div class="sfc-img-node" id="sfcRouterNode1" style="flex:0.85;" data-detail="router1">
+          ${c.router1_img
+            ? `<img src="${c.router1_img}" style="height:65px;mix-blend-mode:screen;object-fit:contain;filter:drop-shadow(0 4px 12px rgba(0,0,0,0.7));"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
+<span style="display:none;font-size:30px;">♨️</span>`
+            : `<span style="font-size:30px;">♨️</span>`}
+          <div class="sfc-router-label">${c.router1_label||'Routeur'}</div>
+          <div class="sfc-router-val inactive" id="sfcRouter1Val">0 W</div>
+        </div>` : ''}
+        ${c.router_scene_mode !== 'sum' && c.router2_enabled ? `
+        <div class="sfc-img-node" id="sfcRouterNode2" style="flex:0.85;" data-detail="router2">
+          ${c.router2_img
+            ? `<img src="${c.router2_img}" style="height:65px;mix-blend-mode:screen;object-fit:contain;filter:drop-shadow(0 4px 12px rgba(0,0,0,0.7));"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
+<span style="display:none;font-size:30px;">🌡️</span>`
+            : `<span style="font-size:30px;">🌡️</span>`}
+          <div class="sfc-router-label">${c.router2_label||'Routeur 2'}</div>
+          <div class="sfc-router-val inactive" id="sfcRouter2Val">0 W</div>
+        </div>` : ''}
+        ${c.router_scene_mode !== 'sum' && c.router3_enabled ? `
+        <div class="sfc-img-node" id="sfcRouterNode3" style="flex:0.85;" data-detail="router3">
+          ${c.router3_img
+            ? `<img src="${c.router3_img}" style="height:65px;mix-blend-mode:screen;object-fit:contain;filter:drop-shadow(0 4px 12px rgba(0,0,0,0.7));"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
+<span style="display:none;font-size:30px;">⚡</span>`
+            : `<span style="font-size:30px;">⚡</span>`}
+          <div class="sfc-router-label">${c.router3_label||'Routeur 3'}</div>
+          <div class="sfc-router-val inactive" id="sfcRouter3Val">0 W</div>
+        </div>` : ''}
+        ${c.router_scene_mode !== 'sum' && c.router4_enabled ? `
+        <div class="sfc-img-node" id="sfcRouterNode4" style="flex:0.85;" data-detail="router4">
+          ${c.router4_img
+            ? `<img src="${c.router4_img}" style="height:65px;mix-blend-mode:screen;object-fit:contain;filter:drop-shadow(0 4px 12px rgba(0,0,0,0.7));"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
+<span style="display:none;font-size:30px;">⚡</span>`
+            : `<span style="font-size:30px;">⚡</span>`}
+          <div class="sfc-router-label">${c.router4_label||'Routeur 4'}</div>
+          <div class="sfc-router-val inactive" id="sfcRouter4Val">0 W</div>
+        </div>` : ''}
+
+        <!-- ── BATTERIE avec niveau liquide ── -->
+        <div class="sfc-img-node node-battery" id="sfcNodeBatt" data-detail="battery">
+          <div class="sfc-batt-wrapper" id="sfcBattWrapper">
+            <!-- Zone liquide calibrée à l'intérieur du cylindre -->
+            <div class="sfc-batt-liquid-wrap">
+              <div class="sfc-batt-empty"></div>
+              <div class="sfc-batt-fill" id="sfcBattLiquid" style="height:0%"></div>
+              <div class="sfc-batt-wave" id="sfcBattWave" style="height:0%"></div>
+            </div>
+            <!-- Image par-dessus (mix-blend-mode:screen efface le fond noir) -->
+            <img class="sfc-batt-img" id="sfcBattImg"
+              src="${c.img_battery || '/local/solar-flow-card/img/battery.png'}"
+              alt="battery" onerror="this.style.display='none'"/>
+            <div class="sfc-batt-shine"></div>
+            <div class="sfc-batt-soc-text" id="sfcBattSocText">—%</div>
+          </div>
+
+          <span id="sfcBattFallback" style="display:none;font-size:36px;">🔋</span>
+          <div class="sfc-img-label">${t(c,"node_battery")}</div>
+          <div class="sfc-img-val c-batt" id="sfcBattFlowPower">0 W</div>
+          <div class="sfc-img-sub" id="sfcBattV">—</div>
+        </div>
+      </div>
+
+      ` : `
+      <!-- EMOJI FALLBACK (show_images: false) -->
+      <div class="sfc-flow" style="position:absolute;bottom:0;left:0;right:0;">
+        <svg class="sfc-flow-svg" viewBox="0 0 420 160" preserveAspectRatio="none">
+          <path id="sfcLG" class="sfc-flow-core" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7)" d="M 60,80 C 120,80 160,80 210,80"/>
+          <path id="sfcLGTailLong" class="sfc-flow-tail-long" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7)" d="M 60,80 C 120,80 160,80 210,80"/>
+          <path id="sfcLGTailMid" class="sfc-flow-tail-mid" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7)" d="M 60,80 C 120,80 160,80 210,80"/>
+          <path id="sfcLGGlow" class="sfc-flow-neon" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7)" d="M 60,80 C 120,80 160,80 210,80"/>
+          <path id="sfcLB" class="sfc-flow-core" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47)" d="M 210,80 C 260,80 300,80 360,80"/>
+          <path id="sfcLBTailLong" class="sfc-flow-tail-long" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47)" d="M 210,80 C 260,80 300,80 360,80"/>
+          <path id="sfcLBTailMid" class="sfc-flow-tail-mid" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47)" d="M 210,80 C 260,80 300,80 360,80"/>
+          <path id="sfcLBGlow" class="sfc-flow-neon" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47)" d="M 210,80 C 260,80 300,80 360,80"/>
+        </svg>
+        <div class="sfc-batt-flow-power" id="sfcBattFlowPower">0 W</div>
+        <div class="sfc-node" data-detail="grid">
+          <div class="sfc-node-icon">🌐</div>
+          <div class="sfc-node-label">${t(c,"node_grid")}</div>
+          <div class="sfc-node-val c-grid" id="sfcGrid">0 W</div>
+          <div class="sfc-node-sub" id="sfcGridDir">—</div>
+        </div>
+        <div class="sfc-node" style="transform:scale(1.12);" data-detail="home">
+          <div class="sfc-node-icon">🏠</div>
+          <div class="sfc-node-label">${t(c,"node_home")}</div>
+          <div class="sfc-node-val c-home" id="sfcHome">0 W</div>
+        </div>
+        <div class="sfc-node" data-detail="battery">
+          <div class="sfc-node-icon">🔋</div>
+          <div class="sfc-node-label">${t(c,"node_battery")}</div>
+          <div class="sfc-node-val c-batt" id="sfcBatt">—%</div>
+          <div class="sfc-node-sub" id="sfcBattV">—</div>
+        </div>
+      </div>`}
+
+      <!-- Panneau détails (clic sur une zone) — placé DANS la scène pour s'afficher au niveau
+           de l'image (et non centré sur toute la carte, surtout sur mobile). -->
+      <div class="sfc-detail" id="sfcDetail">
+        <div class="sfc-detail-card">
+          <div class="sfc-detail-head">
+            <span class="sfc-det-title"></span>
+            <span class="sfc-det-close" id="sfcDetClose">✕</span>
+          </div>
+          <div class="sfc-det-body"></div>
+        </div>
+      </div>
+
+    </div><!-- fin .sfc-unified-scene -->
+
+    <!-- SECTIONS ORDONNABLES — l'ordre suit c.section_order (défaut = ordre ci-dessous) -->
+    ${(() => {
+      const S = {};
+
+      S.bars = showBars ? `
+    ${c.title_bars ? `<div class="sfc-section">${c.title_bars}</div><div class="sfc-gap" style="height:6px;"></div>` : ''}
+    <div class="sfc-progress">
+      <div class="sfc-prow">
+        <span class="sfc-plabel">PV</span>
+        <div class="sfc-ptrack"><div class="sfc-pfill pv" id="sfcPvBar" style="width:0%"></div></div>
+        <span class="sfc-ppct" id="sfcPvBarPct">0%</span>
+      </div>
+      <div class="sfc-prow">
+        <span class="sfc-plabel">PWR</span>
+        <div class="sfc-ptrack"><div class="sfc-pfill pwr" id="sfcPwrBar" style="width:0%"></div></div>
+        <span class="sfc-ppct" id="sfcPwrBarPct">0%</span>
+      </div>
+      <div class="sfc-prow">
+        <span class="sfc-plabel" style="color:var(--sfc-batt,#69FF47)">BAT</span>
+        <div class="sfc-ptrack"><div class="sfc-pfill batt" id="sfcBattBar" style="width:0%"></div></div>
+        <span class="sfc-ppct" id="sfcBattBarPct">0%</span>
+      </div>
+    </div>` : '';
+
+      // ☀️ Bloc PV / Solaire
+      S.pv = `
+    <div class="sfc-section">☀️ ${c.title_pv || t(c,'section_pv')}</div>
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-metrics cols-3">
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"☀️ " + t(c,"inv_today_pv")}</div>
+        <div class="sfc-mc-val c-solar" id="sfcTodayPv">— kWh</div>
+      </div>
+      ${c.pv_total ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"🔆 " + t(c,"lbl_total_pv")}</div>
+        <div class="sfc-mc-val c-solar" id="sfcPvTotal">— kWh</div>
+      </div>` : ''}
+      ${c.show_total_pv ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"🌱 " + t(c,"lbl_co2_today")}</div>
+        <div class="sfc-mc-val" style="color:#6bd47e;" id="sfcMcCo2">— kg</div>
+      </div>` : ''}
+    </div>
+    ${showAuto ? `
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-health" id="sfcAuto">
+      <div class="sfc-health-row">
+        <span class="sfc-health-lbl">${t(c,'lbl_selfconso')}</span>
+        <div class="sfc-health-bar-wrap"><div class="sfc-health-bar" id="sfcSelfConsoBar"></div></div>
+        <span class="sfc-health-val" id="sfcSelfConsoVal">— %</span>
+      </div>
+      <div class="sfc-health-row">
+        <span class="sfc-health-lbl">${t(c,'lbl_selfprod')}</span>
+        <div class="sfc-health-bar-wrap"><div class="sfc-health-bar" id="sfcSelfProdBar"></div></div>
+        <span class="sfc-health-val" id="sfcSelfProdVal">— %</span>
+      </div>
+    </div>` : ''}`;
+
+      // 🏠 Bloc Conso / Réseau — suivi conso complet : instantané + bilan du jour
+      // Chaque tuile = entité configurée ET son interrupteur d'affichage actif (anti-doublon scène)
+      const cTile = {
+        home:   c.home_power        && c.show_conso_home   !== false,
+        grid:   c.grid_power        && c.show_conso_grid   !== false,
+        day:    c.today_load        && c.show_conso_day    !== false,
+        import: c.grid_import_today  && c.show_conso_import !== false,
+        export: c.grid_export_today  && c.show_conso_export !== false,
+        net:    c.grid_import_today  && c.grid_export_today && c.show_conso_net  !== false,
+        cost:   c.grid_import_today  && c.show_conso_cost   !== false,
+      };
+      S.conso = Object.values(cTile).some(Boolean) ? `
+    <div class="sfc-section">🏠 ${c.title_conso || t(c,'section_conso')}</div>
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-metrics cols-3">
+      ${cTile.home ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"🏠 " + t(c,"node_home")}</div>
+        <div class="sfc-mc-val c-home" id="sfcConsoHome">0 W</div>
+      </div>` : ''}
+      ${cTile.grid ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"🔌 " + t(c,"node_grid")}</div>
+        <div class="sfc-mc-val c-grid" id="sfcConsoGrid">0 W</div>
+        <div class="sfc-mc-sub" id="sfcConsoGridDir">—</div>
+      </div>` : ''}
+      ${cTile.day ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"🏡 " + t(c,"inv_today_load")}</div>
+        <div class="sfc-mc-val c-home" id="sfcTodayLoad">— kWh</div>
+        <div class="sfc-mc-sub" id="sfcConsoSub"></div>
+      </div>` : ''}
+      ${cTile.import ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"↓ " + t(c,"lbl_import")}</div>
+        <div class="sfc-mc-val c-grid" id="sfcImportToday">— kWh</div>
+        <div class="sfc-mc-sub" id="sfcImportSub"></div>
+      </div>` : ''}
+      ${cTile.export ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"↑ " + t(c,"lbl_injection")}</div>
+        <div class="sfc-mc-val" style="color:#6bd47e;" id="sfcInjectionToday">— kWh</div>
+        <div class="sfc-mc-sub" id="sfcInjectionSub"></div>
+      </div>` : ''}
+      ${cTile.net ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"⚖️ " + t(c,"lbl_net_grid")}</div>
+        <div class="sfc-mc-val" id="sfcNetGrid">— kWh</div>
+      </div>` : ''}
+      ${cTile.cost ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"💶 " + t(c,"lbl_grid_cost")}</div>
+        <div class="sfc-mc-val" style="color:#FF6B6B;" id="sfcCostToday">— €</div>
+      </div>` : ''}
+    </div>` : '';
+
+      // 📊 Bloc Bilan & Performance — note de l'installation + répartition production/consommation.
+      //    S'adapte aux entités présentes (cas sans PV, sans batterie, etc. — voir _updateBalance).
+      S.balance = showBalance ? `
+    <div class="sfc-section">📊 ${c.title_balance || t(c,'section_balance')}</div>
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-balance" id="sfcBalance">
+      <div class="sfc-bal-grade">
+        <div class="sfc-bal-letter" id="sfcBalGrade">—</div>
+        <div class="sfc-bal-meta">
+          <div class="sfc-bal-score" id="sfcBalScore">—/100</div>
+          <div class="sfc-bal-qual" id="sfcBalQual"></div>
+        </div>
+        <div class="sfc-bal-rates">
+          <div><span class="sfc-bal-rate-lbl">${t(c,'lbl_selfconso')}</span><span class="sfc-bal-rate c-solar" id="sfcBalAutoConso">— %</span></div>
+          <div><span class="sfc-bal-rate-lbl">${t(c,'bal_autonomy')}</span><span class="sfc-bal-rate c-batt" id="sfcBalAutonomie">— %</span></div>
+        </div>
+      </div>
+      <div class="sfc-bal-flow" id="sfcBalProdRow">
+        <div class="sfc-bal-flow-head">${t(c,'bal_production')} · <span id="sfcBalProdTot">—</span></div>
+        <div class="sfc-bal-flow-body" id="sfcBalProd"></div>
+      </div>
+      <div class="sfc-bal-flow" id="sfcBalConsoRow">
+        <div class="sfc-bal-flow-head">${t(c,'bal_consumption')} · <span id="sfcBalConsoTot">—</span></div>
+        <div class="sfc-bal-flow-body" id="sfcBalConso"></div>
+      </div>
+      <div class="sfc-bal-hint">${t(c,'bal_hint')}</div>
+    </div>` : '';
+
+      // 🔋 Bloc Batterie (mode, restant, charge/décharge, cellules, autonomie, santé)
+      S.battery = `
+    <div class="sfc-section">🔋 ${c.title_battery || t(c,'section_battery')}</div>
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-metrics cols-3">
+      ${c.show_mode ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"⚙️ " + t(c,"lbl_mode")}</div>
+        <span class="sfc-mode idle" id="sfcMode">Idle</span>
+      </div>` : ''}
+      ${c.show_bms_temp ? `
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"🌡️ " + t(c,"lbl_bms_temp")}</div>
+        <div class="sfc-mc-val" style="color:#FFA040;" id="sfcBmsT">—°C</div>
+      </div>` : ''}
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"⚡ " + t(c,"inv_remaining")}</div>
+        <div class="sfc-mc-val" style="color:#aaa;" id="sfcRemaining">— kWh</div>
+      </div>
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"🔋 " + t(c,"lbl_batt_chg")}</div>
+        <div class="sfc-mc-val c-batt" id="sfcChgDis">— kWh</div>
+      </div>
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"⚡ " + t(c,"lbl_batt_dis")}</div>
+        <div class="sfc-mc-val c-home" id="sfcBattDis">— kWh</div>
+      </div>
+    </div>
+    ${showCells ? `
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-metrics cols-2">
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"🔋 " + t(c,"lbl_min_cell")}</div>
+        <div class="sfc-mc-val c-batt" id="sfcMinCell">—V</div>
+      </div>
+      <div class="sfc-mc">
+        <div class="sfc-mc-header">${"🔋 " + t(c,"lbl_max_cell")}</div>
+        <div class="sfc-mc-val c-batt" id="sfcMaxCell">—V</div>
+        <div class="sfc-mc-sub" id="sfcCellDelta">Δ —mV</div>
+      </div>
+    </div>` : ''}
+    ${showEnd ? `
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-endurance">
+      <div class="sfc-end-left">${"⏱️ " + t(c,"lbl_endurance")}</div>
+      <div>
+        <span class="sfc-end-val" id="sfcEndVal">— h</span>
+        <span class="sfc-end-sub" id="sfcEndSub"></span>
+      </div>
+    </div>` : ''}`;
+
+      // 🩺 Bloc État de santé batterie (séparé du bloc Batterie pour alléger)
+      S.health = showHealth ? `
+    <div class="sfc-section">🩺 ${c.title_health || t(c,'section_health')}</div>
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-health" id="sfcHealth">
+      <div class="sfc-health-row">
+        <span class="sfc-health-lbl">${t(c,'lbl_soh')}</span>
+        <div class="sfc-health-bar-wrap"><div class="sfc-health-bar" id="sfcSohBar"></div></div>
+        <span class="sfc-health-val" id="sfcSohVal">— %</span>
+      </div>
+      <div class="sfc-health-row">
+        <span class="sfc-health-lbl">${t(c,'lbl_capacity')}</span>
+        <span class="sfc-health-sub" id="sfcCapVal">— kWh</span>
+        <span class="sfc-health-cycles" id="sfcCyclesVal"></span>
+      </div>
+    </div>` : '';
+
+      S.savings = showSavings ? `
+    <div class="sfc-section">💰 ${c.title_savings || t(c,'section_savings')}</div>
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-savings" id="sfcSavings">
+      <div class="sfc-savings-header">
+        ${c.price_mode === 'tempo' ? `<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span class="sfc-tempo-badge" id="sfcTempoBadge" style="display:none;"></span>
+          <span class="sfc-tempo-badge sfc-tempo-tomorrow" id="sfcTempoBadgeTomorrow" style="display:none;"></span>
+        </span>` : '<span></span>'}
+        <span class="sfc-savings-price" id="sfcCurrentPrice">${parseFloat(c.electricity_price||0.23).toFixed(4).replace(/\.?0+$/,'')} €/kWh</span>
+      </div>
+      <div class="sfc-savings-row">
+        <span class="sfc-sav-lbl">${t(c,'sav_today')}</span>
+        <span class="sfc-sav-val" id="sfcSavDay">— €</span>
+        <span class="sfc-sav-co2" id="sfcCo2Day">—</span>
+      </div>
+      ${(c.savings_mode === 'entity' ? c.savings_month_entity : c.pv_month_kwh) ? `<div class="sfc-savings-row">
+        <span class="sfc-sav-lbl">${t(c,'sav_month')}</span>
+        <span class="sfc-sav-val" id="sfcSavMonth">— €</span>
+        <span class="sfc-sav-co2" id="sfcCo2Month">—</span>
+      </div>` : ''}
+      ${(c.savings_mode === 'entity' ? c.savings_year_entity : c.pv_year_kwh) ? `<div class="sfc-savings-row">
+        <span class="sfc-sav-lbl">${t(c,'sav_year')}</span>
+        <span class="sfc-sav-val" id="sfcSavYear">— €</span>
+        <span class="sfc-sav-co2" id="sfcCo2Year">—</span>
+      </div>` : ''}
+      ${c.savings_mode !== 'entity' && c.batt_savings_price ? `<div class="sfc-savings-row">
+        <span class="sfc-sav-lbl">🔋 ${t(c,'sav_battery')}</span>
+        <span class="sfc-sav-val" id="sfcSavBatt">— €</span>
+        <span class="sfc-sav-co2" id="sfcSavBattSub">—</span>
+      </div>` : ''}
+      ${(parseFloat(c.install_cost||0) > 0 || parseFloat(c.batt_cost||0) > 0) && (c.savings_mode === 'entity' ? c.savings_total_entity : c.pv_year_kwh) ? `
+      <div class="sfc-savings-sep"></div>
+      <div class="sfc-roi-row">
+        <span class="sfc-sav-lbl">${t(c,'sav_roi')}</span>
+        <div class="sfc-roi-bar-wrap"><div class="sfc-roi-bar" id="sfcRoiBar"></div></div>
+        <span class="sfc-roi-val" id="sfcRoiVal">— ${t(c,'sav_roi_years')}</span>
+      </div>
+      <div class="sfc-roi-dates" id="sfcRoiDates" style="display:none;"></div>` : ''}
+    </div>` : '';
+
+      // ── Section Routeurs — un badge par routeur ACTIF (tous, quel que soit le mode de scène).
+      //    Headline = puissance temps réel ; sous-lignes = énergie jour/mois/année/total si dispo.
+      //    Indispensable pour les routeurs 3/4 absents de la scène single. Largeur responsive. ──
+      const activeRt = [1,2,3,4].filter(n => c['router'+n+'_enabled']);
+      S.routers = activeRt.length ? `
+    <div class="sfc-section">⚡ ${c.title_routers || t(c,'section_routers')}</div>
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-routers" style="grid-template-columns:repeat(${activeRt.length},1fr);">
+      ${activeRt.map(n => {
+        const col = c['router'+n+'_color'] || '#FFA040';
+        const icon = c['router'+n+'_img']
+          ? `<img class="sfc-rt-ico-img" src="${c['router'+n+'_img']}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'sfc-rt-ico',textContent:'⚡',style:'color:${col}'}))"/>`
+          : `<span class="sfc-rt-ico" style="color:${col}">⚡</span>`;
+        return `
+      <div class="sfc-rt-card" style="--rt:${col};" data-detail="router${n}">
+        ${icon}
+        <div class="sfc-rt-name">${c['router'+n+'_label'] || ('Routeur '+n)}</div>
+        <div class="sfc-rt-day" id="sfcRPwr${n}" style="color:${col}">0 W</div>
+        <div class="sfc-rt-energy" id="sfcRDay${n}" style="color:${col};display:none"></div>
+        <div class="sfc-rt-sub" id="sfcREn${n}Sub"></div>
+      </div>`;
+      }).join('')}
+    </div>` : '';
+
+      // ── Section Véhicule électrique — toutes les infos utiles ──
+      S.ev = c.ev_enabled ? `
+    <div class="sfc-section">🚗 ${c.title_ev || t(c,'section_ev')}</div>
+    <div class="sfc-gap" style="height:6px;"></div>
+    <div class="sfc-ev-card" data-detail="ev">
+      <div class="sfc-ev-item">
+        <span class="sfc-ev-lbl">${c.ev_label || t(c,'section_ev')}</span>
+        <span class="sfc-ev-val" id="sfcEvSecState" style="color:var(--sfc-ev,#4FC3F7)">—</span>
+      </div>
+      <div class="sfc-ev-item">
+        <span class="sfc-ev-lbl">⚡ ${t(c,'lbl_ev_power')}</span>
+        <span class="sfc-ev-val" id="sfcEvSecPwr" style="color:var(--sfc-ev,#4FC3F7)">— W</span>
+      </div>
+      ${c.ev_soc ? `<div class="sfc-ev-item">
+        <span class="sfc-ev-lbl">🔌 ${t(c,'lbl_ev_soc')}</span>
+        <span class="sfc-ev-val" id="sfcEvSecSoc" style="color:var(--sfc-batt,#69FF47)">— %</span>
+      </div>` : ''}
+      ${(c.ev_soc && parseFloat(c.ev_max_kwh) > 0) || parseFloat(c.ev_max_kwh) > 0 ? `<div class="sfc-ev-item">
+        <span class="sfc-ev-lbl">🔋 ${t(c,'lbl_ev_batt')}</span>
+        <span class="sfc-ev-val" id="sfcEvSecKwh" style="color:var(--sfc-batt,#69FF47)">— kWh</span>
+      </div>` : ''}
+    </div>` : '';
+
+      const defOrder = ['bars','pv','conso','balance','battery','health','routers','savings','ev'];
+      let order = (Array.isArray(c.section_order) && c.section_order.length) ? c.section_order.slice() : defOrder.slice();
+      defOrder.forEach(k => { if (!order.includes(k)) order.push(k); });   // clés manquantes en fin (compat.)
+      // Chaque bloc présent est précédé d'un espaceur uniforme.
+      return order.map(k => S[k]).filter(Boolean).map(b => `<div class="sfc-gap"></div>` + b).join('');
+    })()}
+
+    <div class="sfc-gap" style="height:10px;"></div>
+  </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════
+//  EDITOR HTML
+// ══════════════════════════════════════════════════════════
+// Construit le HTML de l'éditeur de configuration : toutes les sections pliables et leurs champs.
+function buildEditorHTML(cfg) {
+  const c = cfg || {};
+  return `
+  <div class="sfc-editor">
+    <div class="sfc-ed-title">☀️ ${t(c,"ed_title")}</div>
+
+    <!-- Liste d'autocomplétion des entités HA (peuplée en JS via set hass) -->
+    <datalist id="sfcEntityList"></datalist>
+
+    <!-- SECTION: Général -->
+    ${edSection('general', t(c,'ed_general'), true, `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,"ed_card_title")}</label>
+        <input class="sfc-ed-input" data-key="title" placeholder="Solar Flow" value="${c.title||''}" />
+      </div>
+      <div class="sfc-ed-grid">
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,"ed_lat")}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="latitude" type="number" step="0.01" placeholder="48.8566" value="${c.latitude||''}" />
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,"ed_lon")}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="longitude" type="number" step="0.01" placeholder="2.3522" value="${c.longitude||''}" />
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,"ed_pv_max")}</label>
+          <label class="sfc-ed-desc">${t(c,"ed_pv_max_desc")}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="pv_max_watts" type="number" placeholder="2500" value="${c.pv_max_watts||''}" />
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,"ed_batt_cap")}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="batt_capacity_kwh" type="number" step="0.1" placeholder="2.4" value="${c.batt_capacity_kwh||''}" />
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,"ed_pwr_kva")}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="pwr_kva" type="number" step="1" placeholder="9" value="${c.pwr_kva||''}" />
+        </div>
+      </div>
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,"ed_language")}</label>
+        <select class="sfc-ed-input" data-key="language" style="cursor:pointer;">
+          <option value="fr" ${(c.language||"fr")==="fr"?"selected":""}>🇫🇷 Français</option>
+          <option value="en" ${(c.language||"fr")==="en"?"selected":""}>🇬🇧 English</option>
+          <option value="vi" ${(c.language||"fr")==="vi"?"selected":""}>🇻🇳 Tiếng Việt</option>
+        </select>
+      </div>
+    `)}
+
+    <!-- SECTION: Images -->
+    ${edSection('images', t(c,'ed_images'), false, `
+      ${edToggle('show_images', t(c,'ed_show_images'), c)}
+      <div class="sfc-ed-info">${t(c,'ed_images_info')}</div>
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_img_scene_mode')}</label>
+        <select class="sfc-ed-input" data-key="img_scene_mode">
+          <option value="single"${(c.img_scene_mode==='single'?' selected':'')}>${t(c,'ed_img_scene_mode_single')}</option>
+          <option value="separate"${(c.img_scene_mode==='separate'?' selected':'')}>${t(c,'ed_img_scene_mode_separate')}</option>
+        </select>
+      </div>
+      ${c.img_scene_mode === 'single' ? edToggle('scene_full_width', t(c,'ed_scene_full_width'), c) : ''}
+      ${c.img_scene_mode === 'single' ? edToggle('show_scene_secondary', t(c,'ed_show_scene_secondary'), c) : ''}
+      ${c.img_scene_mode === 'single' ? edToggle('sky_canvas', t(c,'ed_sky_canvas'), c) : ''}
+      ${c.img_scene_mode === 'single' && c.sky_canvas !== false ? `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_sky_quality')}</label>
+        <select class="sfc-ed-input" data-key="sky_quality">
+          <option value="low"${(c.sky_quality==='low'?' selected':'')}>${t(c,'ed_sky_quality_low')}</option>
+          <option value="medium"${((c.sky_quality||'medium')==='medium'?' selected':'')}>${t(c,'ed_sky_quality_medium')}</option>
+          <option value="high"${(c.sky_quality==='high'?' selected':'')}>${t(c,'ed_sky_quality_high')}</option>
+        </select>
+      </div>` : ''}
+
+      ${c.img_scene_mode === 'separate' ? `
+      ${edEntity('img_house',   t(c,'ed_img_house'),   '/local/solar-flow-card/img/house.png', c)}
+      ${edEntity('img_battery', t(c,'ed_img_battery'), '/local/solar-flow-card/img/battery.png', c)}
+      ${edEntity('img_grid',    t(c,'ed_img_grid'),    '/local/solar-flow-card/img/grid.png', c)}
+      <div class="sfc-ed-label" style="margin-top:8px;color:var(--muted);font-size:10px;">— Overlays optionnels —</div>
+      ${edEntity('img_overlay1',       t(c,'ed_img_overlay1'),       '', c)}
+      ${edEntity('img_overlay1_label', t(c,'ed_img_overlay1_label'), '', c)}
+      ${edEntity('img_overlay2',       t(c,'ed_img_overlay2'),       '', c)}
+      ${edEntity('img_overlay2_label', t(c,'ed_img_overlay2_label'), '', c)}
+      ` : `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_img_scene_variant')}</label>
+        <select class="sfc-ed-input" data-key="img_scene_variant">
+          <option value="esc_ev"${(c.img_scene_variant==='esc_ev'?' selected':'')}>${t(c,'ed_img_scene_variant_ev')}</option>
+          <option value="esc_spa"${(c.img_scene_variant==='esc_spa'?' selected':'')}>${t(c,'ed_img_scene_variant_spa')}</option>
+        </select>
+      </div>
+      ${(c.img_scene_variant||'esc_ev') === 'esc_ev' ? `
+      ${edEntity('img_scene_day_ev',   t(c,'ed_img_scene_day_ev'),   '/local/solar-flow-card/img/scene-day-ev.png', c)}
+      ${edEntity('img_scene_night_ev', t(c,'ed_img_scene_night_ev'), '/local/solar-flow-card/img/scene-night-ev.png', c)}
+      ` : `
+      ${edEntity('img_scene_day_spa',  t(c,'ed_img_scene_day_spa'),  '/local/solar-flow-card/img/scene-day-spa.png', c)}
+      ${edEntity('img_scene_night_spa',t(c,'ed_img_scene_night_spa'),'/local/solar-flow-card/img/scene-night-spa.png', c)}
+      `}
+      <div class="sfc-ed-label" style="margin-top:8px;color:var(--muted);font-size:10px;">— Images par défaut (fallback) —</div>
+      ${edEntity('img_scene_day',    t(c,'ed_img_scene_day'),    '/local/solar-flow-card/img/scene-day.png', c)}
+      ${edEntity('img_scene_night',  t(c,'ed_img_scene_night'),  '/local/solar-flow-card/img/scene-night.png', c)}
+      `}
+    `)}
+
+    <!-- SECTION: PV -->
+    ${edSection('pv', t(c,'ed_pv'), false, `
+      <div class="sfc-ed-info">${t(c,'ed_multi_entity_info')}</div>
+      ${edEntity('pv_power', t(c,'ed_pv_power'), 'sensor.pv1_power, sensor.pv2_power', c)}
+      ${edEntity('pv_today', t(c,'ed_pv_today'), 'sensor.pv1_today, sensor.pv2_today', c)}
+      ${edEntity('pv_total', t(c,'ed_pv_total'), 'sensor.pv1_total, sensor.pv2_total', c)}
+    `)}
+
+    <!-- SECTION: Batterie -->
+    ${edSection('batt', t(c,'ed_batt'), false, `
+      <div class="sfc-ed-info">${t(c,'ed_multi_entity_info')}</div>
+      ${edEntity('batt_soc', t(c,'ed_batt_soc'), 'sensor.zendure_battery_soc', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_batt_bar_mode')}</label>
+        <select class="sfc-ed-input" data-key="batt_bar_mode" style="cursor:pointer;">
+          <option value="soc"   ${(c.batt_bar_mode||'soc')==='soc'  ?'selected':''}>${t(c,'ed_batt_bar_soc')}</option>
+          <option value="power" ${(c.batt_bar_mode||'soc')==='power'?'selected':''}>${t(c,'ed_batt_bar_power')}</option>
+        </select>
+      </div>
+      ${c.batt_bar_mode === 'power' ? `
+      <div class="sfc-ed-info">Barre BAT = puissance batterie ÷ limite. En charge → limite charge ; en décharge → limite décharge.</div>
+      ${edEntity('batt_charge_limit',    t(c,'ed_batt_charge_limit'),    'sensor.solarflow_2400_ac_charge_max_limit', c)}
+      ${edEntity('batt_discharge_limit', t(c,'ed_batt_discharge_limit'), 'sensor.solarflow_2400_ac_discharge_max_limit', c)}
+      ` : ''}
+      ${edEntity('batt_voltage', t(c,'ed_batt_voltage'), 'sensor.zendure_battery_voltage', c)}
+      ${edEntity('batt_mode', t(c,'ed_batt_mode'), 'sensor.zendure_battery_mode', c)}
+      ${edEntity('batt_temp', t(c,'ed_batt_temp'), 'sensor.zendure_bms_temperature', c)}
+      ${edEntity('batt_power', t(c,'ed_batt_power'), 'sensor.zendure_manager_power', c)}
+      ${edToggle('batt_power_invert', t(c,'ed_batt_power_invert'), c)}
+      ${edEntity('batt_chg_today', t(c,'ed_batt_chg'), 'sensor.zendure_charge_today', c)}
+      ${edEntity('batt_dis_today', t(c,'ed_batt_dis'), 'sensor.zendure_discharge_today', c)}
+      ${edEntity('min_cell', t(c,'ed_min_cell'), 'sensor.zendure_min_cell_voltage', c)}
+      ${edEntity('max_cell', t(c,'ed_max_cell'), 'sensor.zendure_max_cell_voltage', c)}
+      ${edEntity('remaining', t(c,'ed_remaining'), 'sensor.zendure_remaining_energy', c)}
+      <div class="sfc-ed-info">Autonomie : si une entité de temps restant est fournie (ex. Zendure <i>remaining_time</i>), elle remplace le calcul théorique.</div>
+      ${edEntity('endurance_entity', t(c,'ed_endurance_entity'), 'sensor.solarflow_2400_ac_remaining_time', c)}
+      ${c.endurance_entity ? `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_endurance_unit')}</label>
+        <select class="sfc-ed-input" data-key="endurance_unit" style="cursor:pointer;">
+          <option value="h"   ${(c.endurance_unit||'h')==='h'  ?'selected':''}>${t(c,'ed_endurance_unit_h')}</option>
+          <option value="min" ${(c.endurance_unit||'h')==='min'?'selected':''}>${t(c,'ed_endurance_unit_min')}</option>
+        </select>
+      </div>` : ''}
+    `)}
+
+    <!-- SECTION: État de santé batterie -->
+    ${edSection('health', t(c,'ed_health'), false, `
+      ${edToggle('show_health', t(c,'ed_show_health'), c)}
+      <div class="sfc-ed-info">SOH = capacité réelle ÷ capacité théorique (= <b>Capacité batterie</b> de la section Général).<br>
+      • <b>Méthode A</b> : entité SOH directe (si votre BMS l'expose en %).<br>
+      • <b>Méthode B</b> : entité <b>capacité totale réelle</b> (ex. Zendure « Total Battery Capacity »). Lue en continu.</div>
+      ${edEntity('batt_soh', t(c,'ed_batt_soh'), 'sensor.battery_soh', c)}
+      ${edEntity('batt_full_kwh', t(c,'ed_batt_full'), 'sensor.solarflow_2400_ac_battery_capacity', c)}
+      <div class="sfc-ed-label" style="margin-top:8px;color:var(--muted);font-size:10px;">— Cycles —</div>
+      ${edEntity('batt_cycles', t(c,'ed_batt_cycles'), 'sensor.battery_cycles', c)}
+      <div class="sfc-ed-info">Pas de capteur de cycles ? Estimation : énergie déchargée cumulée ÷ capacité, + un offset de base.</div>
+      ${edEntity('batt_cycles_energy', t(c,'ed_batt_cycles_energy'), 'sensor.solarflow_2400_ac_total_decharges', c)}
+      <div class="sfc-ed-grid">
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_batt_cycles_base')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="batt_cycles_base" type="number" step="1" placeholder="0" value="${(c.batt_cycles_base!==undefined&&c.batt_cycles_base!=='')?c.batt_cycles_base:''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_batt_cycles_max')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="batt_cycles_max" type="number" step="1" placeholder="6000" value="${(c.batt_cycles_max!==undefined&&c.batt_cycles_max!=='')?c.batt_cycles_max:''}"/>
+        </div>
+      </div>
+    `)}
+
+    <!-- SECTION: Réseau & Maison -->
+    ${edSection('grid', t(c,'ed_grid'), false, `
+      ${edEntity('grid_power', t(c,'ed_grid_power'), 'sensor.linky_power', c)}
+      ${edEntity('home_power', t(c,'ed_home_power'), 'sensor.home_consumption', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_pwr_mode')}</label>
+        <select class="sfc-ed-input" data-key="pwr_mode" style="cursor:pointer;">
+          <option value="direct" ${(c.pwr_mode||'direct')==='direct'?'selected':''}>${t(c,'ed_pwr_mode_direct')}</option>
+          <option value="calc"   ${(c.pwr_mode||'direct')==='calc'  ?'selected':''}>${t(c,'ed_pwr_mode_calc')}</option>
+        </select>
+      </div>
+      ${(c.pwr_mode||'direct')==='calc'
+        ? `<div class="sfc-ed-info">Barre PWR = puissance réseau (W) ÷ puissance souscrite (kVA, section Général). Export = 0%.</div>`
+        : edEntity('pwr_percent', t(c,'ed_pwr_pct'), 'sensor.zendure_output_pack_power', c)}
+      ${edEntity('today_load', t(c,'ed_today_load'), 'sensor.today_home_consumption', c)}
+      ${edEntity('home_month_kwh', t(c,'ed_home_month'), 'sensor.conso_maison_mois', c)}
+      ${edEntity('home_year_kwh', t(c,'ed_home_year'), 'sensor.conso_maison_annee', c)}
+      ${edEntity('grid_import_today', t(c,'ed_grid_import'), 'sensor.energie_soutiree', c)}
+      ${edEntity('grid_import_month', t(c,'ed_grid_import_month'), 'sensor.import_mois', c)}
+      ${edEntity('grid_import_year', t(c,'ed_grid_import_year'), 'sensor.import_annee', c)}
+      <div style="font-size:10px;font-weight:700;color:var(--sfc-solar,#FFD700);margin:10px 0 2px;letter-spacing:1px;">
+        🏠 ${t(c,'ed_conso_vis')}
+      </div>
+      ${edToggle('show_conso_home',   t(c,'ed_show_conso_home'),   c)}
+      ${edToggle('show_conso_grid',   t(c,'ed_show_conso_grid'),   c)}
+      ${edToggle('show_conso_day',    t(c,'ed_show_conso_day'),    c)}
+      ${edToggle('show_conso_import', t(c,'ed_show_conso_import'), c)}
+      ${edToggle('show_conso_export', t(c,'ed_show_conso_export'), c)}
+      ${edToggle('show_conso_net',    t(c,'ed_show_conso_net'),    c)}
+      ${edToggle('show_conso_cost',   t(c,'ed_show_conso_cost'),   c)}
+    `)}
+
+    <!-- SECTION: Météo & Soleil -->
+    ${edSection('meteo', t(c,'ed_meteo'), false, `
+      ${edEntity('weather', t(c,'ed_weather'), 'weather.maison', c)}
+      ${edEntity('ext_temp', t(c,'ed_ext_temp'), 'sensor.temperature_exterieure', c)}
+      <div class="sfc-ed-info">
+        ${t(c,"ed_sun_info")}
+      </div>
+      ${edEntity('sun_elevation', t(c,'ed_sun_elev'), 'sensor.sun_solar_elevation', c)}
+      ${edEntity('sun_azimuth', t(c,'ed_sun_az'), 'sensor.sun_solar_azimuth', c)}
+      ${edEntity('sun_rise', t(c,'ed_sun_rise'), 'sensor.sun_next_rising', c)}
+      ${edEntity('sun_set', t(c,'ed_sun_set'), 'sensor.sun_next_setting', c)}
+      ${edEntity('moon_phase', 'Phase de lune (sensor.moon_phase)', 'sensor.moon_phase', c)}
+    `)}
+
+    <!-- SECTION: Couleurs -->
+    ${edSection('colors', t(c,'ed_colors'), false, `
+      ${edColor('color_solar', t(c,'ed_col_solar'), '#FFD700', c)}
+      ${edColor('color_grid', t(c,'ed_col_grid'),  '#4FC3F7', c)}
+      ${edColor('color_battery', t(c,'ed_col_batt'),'#69FF47', c)}
+      ${edColor('color_home', t(c,'ed_col_home'),  '#FF6B6B', c)}
+      ${edColor('color_ev', t(c,'ed_col_ev'),    '#4FC3F7', c)}
+      ${edColor('color_bg', t(c,'ed_col_bg'),    '#060d1a', c)}
+    `)}
+
+    <!-- SECTION: Routeurs -->
+    ${edSection('routers', t(c,'ed_routers'), false, `
+      <div class="sfc-ed-info">${t(c,'ed_routers_info')}</div>
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_router_scene_mode')}</label>
+        <select class="sfc-ed-input" data-key="router_scene_mode" style="cursor:pointer;">
+          <option value="spread" ${(c.router_scene_mode||'spread')==='spread'?'selected':''}>${t(c,'ed_router_scene_spread')}</option>
+          <option value="sum"    ${(c.router_scene_mode||'spread')==='sum'   ?'selected':''}>${t(c,'ed_router_scene_sum')}</option>
+        </select>
+      </div>
+
+      <div style="font-size:10px;font-weight:700;color:var(--sfc-solar,#FFD700);margin:8px 0 4px;letter-spacing:1px;">
+        ♨️ ${t(c,'ed_router')} 1
+      </div>
+      ${edToggle('router1_enabled', t(c,'ed_router_enabled'), c)}
+      ${edEntity('router1_label',    t(c,'ed_router_label'),   'Spa', c)}
+      ${edEntity('router1_img',      t(c,'ed_router_img'),     '/local/solar-flow-card/img/spa.png', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_router_mode')}</label>
+        <select class="sfc-ed-input" data-key="router1_mode" style="cursor:pointer;">
+          <option value="power" ${(c.router1_mode||'power')==='power'?'selected':''}>${t(c,'ed_router_mode_power')}</option>
+          <option value="calc"  ${(c.router1_mode||'power')==='calc' ?'selected':''}>${t(c,'ed_router_mode_calc')}</option>
+        </select>
+      </div>
+      ${edEntity('router1_power',        t(c,'ed_router_power'),      'sensor.spa_power', c)}
+      ${edEntity('router1_resistance_w', t(c,'ed_router_resistance'),  '2000', c)}
+      ${edEntity('router1_opening',      t(c,'ed_router_opening'),     'sensor.f1atb_opening', c)}
+      ${edEntity('router1_energy',       t(c,'ed_router_energy'),      'sensor.spa_energy_today', c)}
+      ${edEntity('router1_energy_month', t(c,'ed_router_energy_month'),'sensor.spa_energie_mois', c)}
+      ${edEntity('router1_energy_year',  t(c,'ed_router_energy_year'), 'sensor.spa_energie_annee', c)}
+      ${edEntity('router1_energy_total', t(c,'ed_router_energy_total'),'sensor.spa_energie_totale', c)}
+      ${edEntity('router1_temp',         t(c,'ed_router_temp'),         'sensor.spa_temperature', c)}
+      ${edColor('router1_color', t(c,'ed_router_color'), '#FFA040', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_router_pos')}</label>
+        <select class="sfc-ed-input" data-key="router1_position" style="cursor:pointer;">
+          <option value="left"   ${(c.router1_position||'right')==='left'   ?'selected':''}>← ${t(c,'ed_pos_left')}</option>
+          <option value="center" ${(c.router1_position||'right')==='center' ?'selected':''}>↑ ${t(c,'ed_pos_center')}</option>
+          <option value="right"  ${(c.router1_position||'right')==='right'  ?'selected':''}>→ ${t(c,'ed_pos_right')}</option>
+        </select>
+      </div>
+
+      <div style="font-size:10px;font-weight:700;color:var(--sfc-solar,#FFD700);margin:12px 0 4px;letter-spacing:1px;">
+        🌡️ ${t(c,'ed_router')} 2
+      </div>
+      ${edToggle('router2_enabled', t(c,'ed_router_enabled'), c)}
+      ${edEntity('router2_label',    t(c,'ed_router_label'),   'Chauffe-eau', c)}
+      ${edEntity('router2_img',      t(c,'ed_router_img'),     '/local/solar-flow-card/img/water_tank.png', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_router_mode')}</label>
+        <select class="sfc-ed-input" data-key="router2_mode" style="cursor:pointer;">
+          <option value="power" ${(c.router2_mode||'power')==='power'?'selected':''}>${t(c,'ed_router_mode_power')}</option>
+          <option value="calc"  ${(c.router2_mode||'power')==='calc' ?'selected':''}>${t(c,'ed_router_mode_calc')}</option>
+        </select>
+      </div>
+      ${edEntity('router2_power',        t(c,'ed_router_power'),      'sensor.water_heater_power', c)}
+      ${edEntity('router2_resistance_w', t(c,'ed_router_resistance'),  '2000', c)}
+      ${edEntity('router2_opening',      t(c,'ed_router_opening'),     'sensor.f1atb_opening', c)}
+      ${edEntity('router2_energy',       t(c,'ed_router_energy'),      'sensor.water_heater_energy_today', c)}
+      ${edEntity('router2_energy_month', t(c,'ed_router_energy_month'),'sensor.routeur2_energie_mois', c)}
+      ${edEntity('router2_energy_year',  t(c,'ed_router_energy_year'), 'sensor.routeur2_energie_annee', c)}
+      ${edEntity('router2_energy_total', t(c,'ed_router_energy_total'),'sensor.routeur2_energie_totale', c)}
+      ${edColor('router2_color', t(c,'ed_router_color'), '#FFA040', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_router_pos')}</label>
+        <select class="sfc-ed-input" data-key="router2_position" style="cursor:pointer;">
+          <option value="left"   ${(c.router2_position||'left')==='left'   ?'selected':''}>← ${t(c,'ed_pos_left')}</option>
+          <option value="center" ${(c.router2_position||'left')==='center' ?'selected':''}>↑ ${t(c,'ed_pos_center')}</option>
+          <option value="right"  ${(c.router2_position||'left')==='right'  ?'selected':''}>→ ${t(c,'ed_pos_right')}</option>
+        </select>
+      </div>
+
+      <div style="font-size:10px;font-weight:700;color:var(--sfc-solar,#FFD700);margin:12px 0 4px;letter-spacing:1px;">
+        ⚡ ${t(c,'ed_router')} 3
+      </div>
+      ${edToggle('router3_enabled', t(c,'ed_router_enabled'), c)}
+      ${edEntity('router3_label',    t(c,'ed_router_label'),   'Routeur 3', c)}
+      ${edEntity('router3_img',      t(c,'ed_router_img'),     '', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_router_mode')}</label>
+        <select class="sfc-ed-input" data-key="router3_mode" style="cursor:pointer;">
+          <option value="power" ${(c.router3_mode||'power')==='power'?'selected':''}>${t(c,'ed_router_mode_power')}</option>
+          <option value="calc"  ${(c.router3_mode||'power')==='calc' ?'selected':''}>${t(c,'ed_router_mode_calc')}</option>
+        </select>
+      </div>
+      ${edEntity('router3_power',        t(c,'ed_router_power'),      'sensor.router3_power', c)}
+      ${edEntity('router3_resistance_w', t(c,'ed_router_resistance'),  '2000', c)}
+      ${edEntity('router3_opening',      t(c,'ed_router_opening'),     'sensor.f1atb_opening', c)}
+      ${edEntity('router3_energy',       t(c,'ed_router_energy'),      'sensor.router3_energy_today', c)}
+      ${edEntity('router3_energy_month', t(c,'ed_router_energy_month'),'sensor.router3_energie_mois', c)}
+      ${edEntity('router3_energy_year',  t(c,'ed_router_energy_year'), 'sensor.router3_energie_annee', c)}
+      ${edEntity('router3_energy_total', t(c,'ed_router_energy_total'),'sensor.router3_energie_totale', c)}
+      ${edColor('router3_color', t(c,'ed_router_color'), '#FFA040', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_router_pos')}</label>
+        <select class="sfc-ed-input" data-key="router3_position" style="cursor:pointer;">
+          <option value="left"   ${(c.router3_position||'center')==='left'   ?'selected':''}>← ${t(c,'ed_pos_left')}</option>
+          <option value="center" ${(c.router3_position||'center')==='center' ?'selected':''}>↑ ${t(c,'ed_pos_center')}</option>
+          <option value="right"  ${(c.router3_position||'center')==='right'  ?'selected':''}>→ ${t(c,'ed_pos_right')}</option>
+        </select>
+      </div>
+
+      <div style="font-size:10px;font-weight:700;color:var(--sfc-solar,#FFD700);margin:12px 0 4px;letter-spacing:1px;">
+        ⚡ ${t(c,'ed_router')} 4
+      </div>
+      ${edToggle('router4_enabled', t(c,'ed_router_enabled'), c)}
+      ${edEntity('router4_label',    t(c,'ed_router_label'),   'Routeur 4', c)}
+      ${edEntity('router4_img',      t(c,'ed_router_img'),     '', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_router_mode')}</label>
+        <select class="sfc-ed-input" data-key="router4_mode" style="cursor:pointer;">
+          <option value="power" ${(c.router4_mode||'power')==='power'?'selected':''}>${t(c,'ed_router_mode_power')}</option>
+          <option value="calc"  ${(c.router4_mode||'power')==='calc' ?'selected':''}>${t(c,'ed_router_mode_calc')}</option>
+        </select>
+      </div>
+      ${edEntity('router4_power',        t(c,'ed_router_power'),      'sensor.router4_power', c)}
+      ${edEntity('router4_resistance_w', t(c,'ed_router_resistance'),  '2000', c)}
+      ${edEntity('router4_opening',      t(c,'ed_router_opening'),     'sensor.f1atb_opening', c)}
+      ${edEntity('router4_energy',       t(c,'ed_router_energy'),      'sensor.router4_energy_today', c)}
+      ${edEntity('router4_energy_month', t(c,'ed_router_energy_month'),'sensor.router4_energie_mois', c)}
+      ${edEntity('router4_energy_year',  t(c,'ed_router_energy_year'), 'sensor.router4_energie_annee', c)}
+      ${edEntity('router4_energy_total', t(c,'ed_router_energy_total'),'sensor.router4_energie_totale', c)}
+      ${edColor('router4_color', t(c,'ed_router_color'), '#FFA040', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_router_pos')}</label>
+        <select class="sfc-ed-input" data-key="router4_position" style="cursor:pointer;">
+          <option value="left"   ${(c.router4_position||'center')==='left'   ?'selected':''}>← ${t(c,'ed_pos_left')}</option>
+          <option value="center" ${(c.router4_position||'center')==='center' ?'selected':''}>↑ ${t(c,'ed_pos_center')}</option>
+          <option value="right"  ${(c.router4_position||'center')==='right'  ?'selected':''}>→ ${t(c,'ed_pos_right')}</option>
+        </select>
+      </div>
+    `)}
+
+    <!-- SECTION: Images -->
+    <!-- SECTION: Économies & Tarification -->
+    ${edSection('savings', t(c,'ed_savings'), false, `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_savings_mode')}</label>
+        <select class="sfc-ed-input" data-key="savings_mode" style="cursor:pointer;">
+          <option value="calc"   ${(c.savings_mode||'calc')==='calc'  ?'selected':''}>${t(c,'ed_savings_mode_calc')}</option>
+          <option value="entity" ${(c.savings_mode||'calc')==='entity'?'selected':''}>${t(c,'ed_savings_mode_entity')}</option>
+        </select>
+      </div>
+      ${c.savings_mode === 'entity' ? `
+      <div class="sfc-ed-info">${t(c,'ed_savings_entity_info')}</div>
+      ${edEntity('savings_day_entity',   t(c,'ed_savings_day_entity'),   'sensor.economies_jour', c)}
+      ${edEntity('savings_month_entity', t(c,'ed_savings_month_entity'), 'sensor.economies_mois', c)}
+      ${edEntity('savings_year_entity',  t(c,'ed_savings_year_entity'),  'sensor.economies_annee', c)}
+      ${edEntity('savings_total_entity', t(c,'ed_savings_total_entity'), 'sensor.economies_totales', c)}
+      ` : ''}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_price_mode')}</label>
+        <select class="sfc-ed-input" data-key="price_mode" style="cursor:pointer;">
+          <option value="fixed"  ${(c.price_mode||'fixed')==='fixed' ?'selected':''}>${t(c,'ed_price_mode_fixed')}</option>
+          <option value="hphc"   ${(c.price_mode||'fixed')==='hphc'  ?'selected':''}>${t(c,'ed_price_mode_hphc')}</option>
+          <option value="tempo"  ${(c.price_mode||'fixed')==='tempo' ?'selected':''}>${t(c,'ed_price_mode_tempo')}</option>
+          <option value="entity" ${(c.price_mode||'fixed')==='entity'?'selected':''}>${t(c,'ed_price_mode_entity')}</option>
+        </select>
+      </div>
+
+      ${(c.price_mode||'fixed')==='fixed' ? `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_elec_price')}</label>
+        <input class="sfc-ed-input sfc-ed-number" data-key="electricity_price" type="number" step="0.0001" placeholder="0.23" value="${c.electricity_price||''}"/>
+      </div>` : ''}
+
+      ${c.price_mode==='hphc' ? `
+      <div class="sfc-ed-grid">
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_hp_price')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="hp_price" type="number" step="0.0001" placeholder="0.27" value="${c.hp_price||''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_hc_price')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="hc_price" type="number" step="0.0001" placeholder="0.20" value="${c.hc_price||''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_hc_start')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="hc_start" type="number" min="0" max="23" placeholder="22" value="${(c.hc_start!==undefined&&c.hc_start!=='')?c.hc_start:''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_hc_end')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="hc_end" type="number" min="0" max="23" placeholder="6" value="${(c.hc_end!==undefined&&c.hc_end!=='')?c.hc_end:''}"/>
+        </div>
+      </div>` : ''}
+
+      ${c.price_mode==='entity' ? `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_price_entity')}</label>
+        <label class="sfc-ed-desc">Entité HA retournant le prix €/kWh en temps réel</label>
+        <input class="sfc-ed-input" data-key="price_entity" placeholder="sensor.prix_kwh" value="${c.price_entity||''}"/>
+      </div>` : ''}
+
+      ${c.price_mode==='tempo' ? `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_tempo_color')}</label>
+        <label class="sfc-ed-desc">Entité couleur Tempo (BLUE/WHITE/RED)</label>
+        <input class="sfc-ed-input" data-key="tempo_color" placeholder="sensor.rte_tempo_color" value="${c.tempo_color||''}"/>
+      </div>
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_tempo_color_tomorrow')}</label>
+        <label class="sfc-ed-desc">Vide = détection auto via l'attribut <i>tomorrow</i> / <i>next_color</i> de l'entité ci-dessus</label>
+        <input class="sfc-ed-input" data-key="tempo_color_tomorrow" placeholder="sensor.rte_tempo_prochaine_couleur" value="${c.tempo_color_tomorrow||''}"/>
+      </div>
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_tempo_price_entity')}</label>
+        <label class="sfc-ed-desc">Si renseigné, ce prix temps réel est utilisé à la place des tables ci-dessous (le badge couleur reste affiché)</label>
+        <input class="sfc-ed-input" data-key="price_entity" placeholder="sensor.tarif_actuel" value="${c.price_entity||''}"/>
+      </div>
+      ${!c.price_entity ? `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label" style="color:#7ad;">${t(c,'ed_tempo_prices')} — 🔵 Bleu</label>
+        <div class="sfc-ed-grid">
+          <div class="sfc-ed-row">
+            <label class="sfc-ed-label">HC</label>
+            <input class="sfc-ed-input sfc-ed-number" data-key="tempo_blue_hc" type="number" step="0.0001" placeholder="0.1296" value="${c.tempo_blue_hc||''}"/>
+          </div>
+          <div class="sfc-ed-row">
+            <label class="sfc-ed-label">HP</label>
+            <input class="sfc-ed-input sfc-ed-number" data-key="tempo_blue_hp" type="number" step="0.0001" placeholder="0.1609" value="${c.tempo_blue_hp||''}"/>
+          </div>
+        </div>
+      </div>
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label" style="color:#cce;">— ⚪ Blanc</label>
+        <div class="sfc-ed-grid">
+          <div class="sfc-ed-row">
+            <label class="sfc-ed-label">HC</label>
+            <input class="sfc-ed-input sfc-ed-number" data-key="tempo_white_hc" type="number" step="0.0001" placeholder="0.1470" value="${c.tempo_white_hc||''}"/>
+          </div>
+          <div class="sfc-ed-row">
+            <label class="sfc-ed-label">HP</label>
+            <input class="sfc-ed-input sfc-ed-number" data-key="tempo_white_hp" type="number" step="0.0001" placeholder="0.1894" value="${c.tempo_white_hp||''}"/>
+          </div>
+        </div>
+      </div>
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label" style="color:#f88;">— 🔴 Rouge</label>
+        <div class="sfc-ed-grid">
+          <div class="sfc-ed-row">
+            <label class="sfc-ed-label">HC</label>
+            <input class="sfc-ed-input sfc-ed-number" data-key="tempo_red_hc" type="number" step="0.0001" placeholder="0.1568" value="${c.tempo_red_hc||''}"/>
+          </div>
+          <div class="sfc-ed-row">
+            <label class="sfc-ed-label">HP</label>
+            <input class="sfc-ed-input sfc-ed-number" data-key="tempo_red_hp" type="number" step="0.0001" placeholder="0.7562" value="${c.tempo_red_hp||''}"/>
+          </div>
+        </div>
+      </div>
+      ` : ''}` : ''}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_grid_export')}</label>
+        <input class="sfc-ed-input" data-key="grid_export_today" placeholder="sensor.energie_injectee" value="${c.grid_export_today||''}"/>
+      </div>
+      ${edToggle('export_paid', t(c,'ed_export_paid'), c)}
+      ${c.export_paid ? `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_export_price')}</label>
+        <input class="sfc-ed-input sfc-ed-number" data-key="export_price" type="number" step="0.0001" placeholder="0.10" value="${c.export_price||''}"/>
+      </div>
+      <div class="sfc-ed-grid">
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_export_month')}</label>
+          <input class="sfc-ed-input" data-key="grid_export_month" placeholder="sensor.export_mois" value="${c.grid_export_month||''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_export_year')}</label>
+          <input class="sfc-ed-input" data-key="grid_export_year" placeholder="sensor.export_annee" value="${c.grid_export_year||''}"/>
+        </div>
+      </div>` : ''}
+      <div class="sfc-ed-grid">
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_pv_month')}</label>
+          <input class="sfc-ed-input" data-key="pv_month_kwh" placeholder="sensor.pv_mois" value="${c.pv_month_kwh||''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_pv_year')}</label>
+          <input class="sfc-ed-input" data-key="pv_year_kwh" placeholder="sensor.pv_annee" value="${c.pv_year_kwh||''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_install_cost')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="install_cost" type="number" placeholder="8000" value="${c.install_cost||''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_batt_cost')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="batt_cost" type="number" placeholder="4000" value="${c.batt_cost||''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_co2_factor')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="co2_factor" type="number" step="0.01" placeholder="0.4" value="${c.co2_factor||''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_install_date')}</label>
+          <input class="sfc-ed-input" data-key="install_date" type="date" value="${c.install_date||''}"/>
+        </div>
+      </div>
+      <div class="sfc-ed-info">${t(c,'ed_roi_info')}</div>
+      ${edEntity('batt_savings_kwh', t(c,'ed_batt_savings_kwh'), 'sensor.solarflow_2400_ac_total_decharges', c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_batt_savings_price')}</label>
+        <input class="sfc-ed-input sfc-ed-number" data-key="batt_savings_price" type="number" step="0.0001" placeholder="0.20" value="${c.batt_savings_price||''}"/>
+      </div>
+      <div class="sfc-ed-info">${t(c,'ed_batt_roi_info')}</div>
+    `)}
+
+    <!-- SECTION: Prévision de production -->
+    ${edSection('forecast', t(c,'ed_forecast'), false, `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_forecast_today')}</label>
+        <label class="sfc-ed-desc">Affiché en haut à gauche du ciel — laisser vide pour masquer</label>
+        <input class="sfc-ed-input" data-key="pv_forecast_today" placeholder="sensor.solcast_forecast_today" value="${c.pv_forecast_today||''}"/>
+      </div>
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_forecast_tomorrow')}</label>
+        <input class="sfc-ed-input" data-key="pv_forecast_tomorrow" placeholder="sensor.solcast_forecast_tomorrow" value="${c.pv_forecast_tomorrow||''}"/>
+      </div>
+    `)}
+
+    <!-- SECTION: Véhicule électrique -->
+    ${edSection('ev', t(c,'ed_ev'), false, `
+      ${edToggle('ev_enabled', t(c,'ed_ev'), c)}
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_ev_label')}</label>
+        <input class="sfc-ed-input" data-key="ev_label" placeholder="Voiture" value="${c.ev_label||''}"/>
+      </div>
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_ev_power')}</label>
+        <label class="sfc-ed-desc">Positif = charge, Négatif = V2H (décharge vers maison)</label>
+        <input class="sfc-ed-input" data-key="ev_power" placeholder="sensor.ev_power" value="${c.ev_power||''}"/>
+      </div>
+      <div class="sfc-ed-grid">
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_ev_soc')}</label>
+          <input class="sfc-ed-input" data-key="ev_soc" placeholder="sensor.ev_soc" value="${c.ev_soc||''}"/>
+        </div>
+        <div class="sfc-ed-row">
+          <label class="sfc-ed-label">${t(c,'ed_ev_max_kwh')}</label>
+          <input class="sfc-ed-input sfc-ed-number" data-key="ev_max_kwh" type="number" step="0.1" placeholder="75" value="${c.ev_max_kwh||''}"/>
+        </div>
+      </div>
+    `)}
+
+    <!-- SECTION: Tailles d'affichage -->
+    ${edSection('appearance', t(c,'ed_appearance'), false, `
+      ${edRange('scale_flux',  t(c,'ed_scale_flux'),  0.5, 2,   0.05, c)}
+      ${edRange('scale_label', t(c,'ed_scale_label'), 0.6, 1.8, 0.05, c)}
+      ${edRange('scale_value', t(c,'ed_scale_value'), 0.6, 1.8, 0.05, c)}
+    `)}
+
+    <!-- SECTION: Affichage -->
+    ${edSection('display', t(c,'ed_display'), false, `
+      ${edToggle('show_progress_bars', t(c,'ed_show_bars'), c)}
+      ${edToggle('show_mode', t(c,'ed_show_mode'), c)}
+      ${edToggle('show_bms_temp', t(c,'ed_show_bms'), c)}
+      ${edToggle('show_total_pv', t(c,'ed_show_total_pv'), c)}
+      ${edToggle('show_cells', t(c,'ed_show_cells'), c)}
+      ${edToggle('show_endurance', t(c,'ed_show_endurance'), c)}
+      ${edToggle('show_inverter', t(c,'ed_show_inverter'), c)}
+      ${edToggle('show_autoconso', t(c,'ed_show_autoconso'), c)}
+      ${edToggle('show_balance',  t(c,'ed_show_balance'),  c)}
+      ${edToggle('show_savings',  t(c,'ed_show_savings'),  c)}
+      ${edToggle('details_on_click', t(c,'ed_details_on_click'), c)}
+    `)}
+
+    <!-- SECTION: Notification bilan quotidien -->
+    ${edSection('notif_balance', t(c,'ed_notif_balance'), false, `
+      <div class="sfc-ed-info">${t(c,'ed_notif_balance_info')}</div>
+      ${edToggle('notif_balance_enabled', t(c,'ed_notif_balance_enabled'), c)}
+      ${c.notif_balance_enabled !== false ? `
+      <div class="sfc-ed-row">
+        <label class="sfc-ed-label">${t(c,'ed_notif_balance_time')}</label>
+        <input class="sfc-ed-input" type="time" data-key="notif_balance_time" value="${c.notif_balance_time || '23:59'}"/>
+      </div>` : ''}
+    `)}
+
+    <!-- SECTION: Ordre des sections -->
+    ${edSection('order', t(c,'ed_section_order'), false, `
+      <div class="sfc-ed-info">${t(c,'ed_section_order_info')}</div>
+      ${edOrderList(c)}
+    `)}
+
+    <!-- SECTION: Titres des sections -->
+    ${edSection('titles', t(c,'ed_section_titles'), false, `
+      <div class="sfc-ed-info">${t(c,'ed_section_titles_info')}</div>
+      ${edEntity('title_bars',      t(c,'sec_bars'),      '—', c)}
+      ${edEntity('title_pv',        t(c,'sec_pv'),        t(c,'section_pv'),        c)}
+      ${edEntity('title_conso',     t(c,'sec_conso'),     t(c,'section_conso'),     c)}
+      ${edEntity('title_balance',   t(c,'sec_balance'),   t(c,'section_balance'),   c)}
+      ${edEntity('title_battery',   t(c,'sec_battery'),   t(c,'section_battery'),   c)}
+      ${edEntity('title_health',    t(c,'sec_health'),    t(c,'section_health'),    c)}
+      ${edEntity('title_savings',   t(c,'sec_savings'),   t(c,'section_savings'),   c)}
+      ${edEntity('title_routers',   t(c,'sec_routers'),   t(c,'section_routers'),   c)}
+      ${edEntity('title_ev',        t(c,'sec_ev'),        t(c,'section_ev'),        c)}
+    `)}
+
+    <!-- ACTIONS -->
+    <div class="sfc-ed-actions">
+      <button class="sfc-ed-btn secondary" id="sfcEdReset">↺ Réinitialiser</button>
+    </div>
+  </div>
+  `;
+}
+
+// Génère une section pliable de l'éditeur (en-tête cliquable + corps).
+function edSection(id, title, open, body) {
+  return `
+  <div class="sfc-ed-section">
+    <div class="sfc-ed-section-header ${open ? 'active' : ''}" data-section="${id}">
+      <span>${title}</span>
+      <em class="sfc-ed-chevron ${open ? 'open' : ''}">▾</em>
+    </div>
+    <div class="sfc-ed-body ${open ? 'open' : ''}" id="sfc-sec-${id}">
+      ${body}
+    </div>
+  </div>`;
+}
+
+// Génère un champ texte/entité (libellé + input lié à data-key, avec placeholder).
+function edEntity(key, label, placeholder, cfg) {
+  const val = (cfg && cfg[key] !== undefined && cfg[key] !== null) ? String(cfg[key]) : '';
+  return `<div class="sfc-ed-row">
+    <label class="sfc-ed-label">${label}</label>
+    <input class="sfc-ed-input" data-key="${key}" placeholder="${placeholder}" value="${val}"/>
+  </div>`;
+}
+
+// Génère un sélecteur de couleur (pastille + champ texte hexadécimal synchronisés).
+function edColor(key, label, def, cfg) {
+  const val = (cfg && cfg[key]) ? cfg[key] : def;
+  return `<div class="sfc-ed-row">
+    <label class="sfc-ed-label">${label}</label>
+    <div class="sfc-color-row">
+      <input type="color" class="sfc-color-swatch" data-key="${key}" value="${val}"/>
+      <input class="sfc-ed-input sfc-color-input" data-key="${key}_text" placeholder="${def}" value="${val}" data-color-key="${key}"/>
+    </div>
+  </div>`;
+}
+
+// Génère un interrupteur on/off (activé par défaut sauf si la clé vaut false).
+function edToggle(key, label, cfg) {
+  const on = (!cfg || cfg[key] !== false) ? 'on' : '';
+  return `<div class="sfc-ed-toggle-row">
+    <span class="sfc-ed-toggle-label">${label}</span>
+    <div class="sfc-toggle ${on}" data-key="${key}" data-toggle="true"></div>
+  </div>`;
+}
+
+// Ordre par défaut des sections (utilisé par la carte ET l'éditeur)
+const SECTION_ORDER_DEFAULT = ['bars','pv','conso','balance','battery','health','routers','savings','ev'];
+
+// Normalise un ordre : garde les clés valides, complète avec les manquantes.
+function normalizeSectionOrder(arr) {
+  let order = (Array.isArray(arr) && arr.length) ? arr.filter(k => SECTION_ORDER_DEFAULT.includes(k)) : [];
+  SECTION_ORDER_DEFAULT.forEach(k => { if (!order.includes(k)) order.push(k); });
+  return order;
+}
+
+// Liste réordonnable (▲▼) pour l'éditeur.
+function edOrderList(cfg) {
+  const order = normalizeSectionOrder(cfg && cfg.section_order);
+  return order.map((k, i) => `
+    <div class="sfc-ord-row">
+      <span class="sfc-ord-lbl">${i + 1}. ${t(cfg, 'sec_' + k)}</span>
+      <span class="sfc-ord-btns">
+        <button class="sfc-ord-btn" data-ord-up="${k}" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="sfc-ord-btn" data-ord-down="${k}" ${i === order.length - 1 ? 'disabled' : ''}>▼</button>
+      </span>
+    </div>`).join('');
+}
+
+// Génère un curseur (slider) avec sa valeur affichée (ex. multiplicateur ×).
+function edRange(key, label, min, max, step, cfg) {
+  const v = (cfg && cfg[key] !== undefined && cfg[key] !== '') ? parseFloat(cfg[key]) : 1;
+  return `<div class="sfc-ed-row">
+    <label class="sfc-ed-label">${label} — <span class="sfc-range-val" data-range-for="${key}">${v.toFixed(2)}×</span></label>
+    <input type="range" class="sfc-ed-range" min="${min}" max="${max}" step="${step}" data-key="${key}" value="${v}"/>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════
+//  SCENE RENDERER (canvas ciel + météo — mode single)
+// ══════════════════════════════════════════════════════════
+// Porté de « immersive-weather-dashboard » (src/rendering/scene-renderer.ts).
+// Deux canvas empilés dans la zone transparente de l'image de scène :
+//   • bg  (z:0, DERRIÈRE l'image)  → dégradé de ciel + nuages + étoiles
+//   • fg  (z:6, DEVANT l'image)    → pluie / averse / neige / grêle / brouillard / vent / éclairs
+// Le soleil/lune « emoji » + l'arc restent gérés par la carte (drawSun=false par défaut).
+
+const SFC_QUALITY_PRESETS = {
+  // `clouds` = nombre MAX de nuages (à 100% de couverture) ; le rendu en dessine une
+  // fraction proportionnelle à cloud_coverage (voir drawClouds).
+  low:    { rain: 50,  snow: 35,  hail: 25,  stars: 40,  clouds: 5 },
+  medium: { rain: 140, snow: 80,  hail: 60,  stars: 90,  clouds: 8 },
+  high:   { rain: 280, snow: 150, hail: 110, stars: 150, clouds: 11 },
+};
+
+// Points de dégradé jour/nuit (haut & bas) par catégorie météo — mélangés selon l'élévation solaire.
+const SFC_SKY_PALETTES = {
+  clear:           { dayTop:'#2f8ce0', dayBottom:'#bfe4ff', nightTop:'#050818', nightBottom:'#161a35' },
+  'partly-cloudy': { dayTop:'#4f9be0', dayBottom:'#bfe0f5', nightTop:'#0c1330', nightBottom:'#1c2650' },
+  cloudy:          { dayTop:'#8f9bb0', dayBottom:'#c3ccd8', nightTop:'#141b2c', nightBottom:'#232d42' },
+  fog:             { dayTop:'#c8d0d8', dayBottom:'#dfe4e8', nightTop:'#2b3440', nightBottom:'#3d4753' },
+  rain:            { dayTop:'#5b6b82', dayBottom:'#8a97a8', nightTop:'#0d1220', nightBottom:'#1c2436' },
+  pouring:         { dayTop:'#5b6b82', dayBottom:'#8a97a8', nightTop:'#0d1220', nightBottom:'#1c2436' },
+  snow:            { dayTop:'#aebbcc', dayBottom:'#e2e8f0', nightTop:'#1b2436', nightBottom:'#2e3850' },
+  'snowy-rainy':   { dayTop:'#8f9bb0', dayBottom:'#c3ccd8', nightTop:'#141b2c', nightBottom:'#232d42' },
+  hail:            { dayTop:'#8f9bb0', dayBottom:'#c3ccd8', nightTop:'#141b2c', nightBottom:'#232d42' },
+  thunderstorm:    { dayTop:'#4a5568', dayBottom:'#718096', nightTop:'#0b0f19', nightBottom:'#1a202c' },
+  windy:           { dayTop:'#2f8ce0', dayBottom:'#bfe4ff', nightTop:'#050818', nightBottom:'#161a35' },
+};
+
+// Intensité de la teinte « golden hour » qui transparaît à l'horizon (ciel dégagé = max).
+const SFC_SKY_CLEARNESS = {
+  clear:1, 'partly-cloudy':0.8, windy:0.9, snow:0.5, cloudy:0.4,
+  'snowy-rainy':0.35, hail:0.35, rain:0.3, pouring:0.25, fog:0.2, thunderstorm:0.15,
+};
+const SFC_GOLDEN_TOP = '#b0648a';      // rose crépusculaire au zénith
+const SFC_GOLDEN_HORIZON = '#ff7a3c';  // orange chaud près de l'horizon
+
+// Condition météo HA → catégorie de scène du renderer.
+const SFC_CONDITION_TO_SCENE = {
+  'clear-night':'clear', sunny:'clear', partlycloudy:'partly-cloudy', cloudy:'cloudy',
+  fog:'fog', rainy:'rain', pouring:'pouring', snowy:'snow', 'snowy-rainy':'snowy-rainy',
+  hail:'hail', lightning:'thunderstorm', 'lightning-rainy':'thunderstorm',
+  windy:'windy', 'windy-variant':'windy', exceptional:'cloudy',
+};
+function sfcConditionToScene(cond) {
+  if (!cond) return 'clear';
+  return SFC_CONDITION_TO_SCENE[cond] || 'cloudy';
+}
+
+function sfcClamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+// PRNG déterministe Mulberry32 — placement des particules stable d'une frame à l'autre.
+function sfcCreateRng(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function sfcRandomRange(rng, min, max) { return min + rng() * (max - min); }
+function sfcHexToRgb(hex) { const n = parseInt(hex.slice(1), 16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+function sfcMixRgb(a, b, t) {
+  const ca = sfcHexToRgb(a), cb = sfcHexToRgb(b);
+  return [Math.round(ca[0]+(cb[0]-ca[0])*t), Math.round(ca[1]+(cb[1]-ca[1])*t), Math.round(ca[2]+(cb[2]-ca[2])*t)];
+}
+function sfcTintRgb(base, hex, t) {
+  const h = sfcHexToRgb(hex);
+  return [Math.round(base[0]+(h[0]-base[0])*t), Math.round(base[1]+(h[1]-base[1])*t), Math.round(base[2]+(h[2]-base[2])*t)];
+}
+function sfcRgbStr(c) { return 'rgb(' + c[0] + ', ' + c[1] + ', ' + c[2] + ')'; }
+function sfcRgbaStr(c, a) { return 'rgba(' + c[0] + ', ' + c[1] + ', ' + c[2] + ', ' + a + ')'; }
+
+const SFC_MAX_DPR = 2;
+
+class SfcSceneRenderer {
+  constructor(bgCanvas, fgCanvas) {
+    this.bgCanvas = bgCanvas;
+    this.fgCanvas = fgCanvas;
+    this.bgCtx = bgCanvas.getContext('2d');
+    this.fgCtx = fgCanvas.getContext('2d');
+    this.width = 0; this.height = 0; this.dpr = 1;
+    this.rafHandle = undefined; this.lastTimestamp = 0;
+    this.paused = false; this.elapsed = 0;
+    this.state = {
+      category: 'clear', isDay: true, quality: 'medium', intensity: 1,
+      windSpeedKmh: 0, windBearingDeg: 0, reducedMotion: false, cloudCoverage: 0,
+      sunElevation: 25, sunAzimuth: 180, drawSun: false,
+    };
+    this.rain = []; this.snow = []; this.hail = []; this.clouds = []; this.stars = []; this.windStreaks = [];
+    this.lightningTimer = 0; this.lightningFlash = 0;
+  }
+
+  resize(width, height, devicePixelRatio) {
+    if (!this.bgCtx || !this.fgCtx) return;
+    this.width = width; this.height = height;
+    this.dpr = sfcClamp(devicePixelRatio, 1, SFC_MAX_DPR);
+    for (const canvas of [this.bgCanvas, this.fgCanvas]) {
+      canvas.width = Math.round(width * this.dpr);
+      canvas.height = Math.round(height * this.dpr);
+      canvas.style.width = width + 'px';
+      canvas.style.height = height + 'px';
+    }
+    this.bgCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.fgCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.regenerateParticles();
+    this.renderFrame(0);
+  }
+
+  setState(next) {
+    const qualityChanged = next.quality !== this.state.quality;
+    const categoryChanged = next.category !== this.state.category;
+    this.state = next;
+    if (qualityChanged || categoryChanged || this.stars.length === 0) this.regenerateParticles();
+    if (this.state.reducedMotion) { this.stop(); this.renderFrame(0); }
+    else if (!this.paused) this.start();
+  }
+
+  setPaused(paused) {
+    if (this.paused === paused) return;
+    this.paused = paused;
+    if (paused) this.stop();
+    else if (!this.state.reducedMotion) this.start();
+  }
+
+  start() {
+    if (this.rafHandle !== undefined || this.paused || this.state.reducedMotion) return;
+    this.lastTimestamp = performance.now();
+    const loop = (timestamp) => {
+      const dt = sfcClamp((timestamp - this.lastTimestamp) / 1000, 0, 0.1);
+      this.lastTimestamp = timestamp;
+      this.elapsed += dt;
+      this.renderFrame(dt);
+      this.rafHandle = requestAnimationFrame(loop);
+    };
+    this.rafHandle = requestAnimationFrame(loop);
+  }
+
+  stop() {
+    if (this.rafHandle !== undefined) { cancelAnimationFrame(this.rafHandle); this.rafHandle = undefined; }
+  }
+
+  dispose() { this.paused = true; this.stop(); }
+
+  regenerateParticles() {
+    const preset = SFC_QUALITY_PRESETS[this.state.quality] || SFC_QUALITY_PRESETS.medium;
+    const rng = sfcCreateRng(Math.round(this.width * 31 + this.height * 17) || 1);
+    const factor = sfcClamp(this.state.intensity, 0, 2);
+    this.stars = Array.from({ length: preset.stars }, () => ({
+      x: sfcRandomRange(rng, 0, this.width), y: sfcRandomRange(rng, 0, this.height * 0.6),
+      radius: sfcRandomRange(rng, 0.4, 1.6), phase: sfcRandomRange(rng, 0, Math.PI * 2),
+    }));
+    this.clouds = Array.from({ length: preset.clouds }, () => ({
+      x: sfcRandomRange(rng, -0.2 * this.width, this.width), y: sfcRandomRange(rng, this.height * 0.05, this.height * 0.4),
+      scale: sfcRandomRange(rng, 0.6, 1.6), speed: sfcRandomRange(rng, 4, 12), opacity: sfcRandomRange(rng, 0.35, 0.75),
+    }));
+    this.rain = Array.from({ length: Math.round(preset.rain * factor) }, () => ({
+      x: sfcRandomRange(rng, 0, this.width), y: sfcRandomRange(rng, 0, this.height),
+      length: sfcRandomRange(rng, 10, 22), speed: sfcRandomRange(rng, 500, 900), opacity: sfcRandomRange(rng, 0.25, 0.6),
+    }));
+    this.snow = Array.from({ length: Math.round(preset.snow * factor) }, () => ({
+      x: sfcRandomRange(rng, 0, this.width), y: sfcRandomRange(rng, 0, this.height),
+      radius: sfcRandomRange(rng, 1.5, 4), speed: sfcRandomRange(rng, 30, 90),
+      driftPhase: sfcRandomRange(rng, 0, Math.PI * 2), driftSpeed: sfcRandomRange(rng, 0.5, 1.5),
+    }));
+    this.hail = Array.from({ length: Math.round(preset.hail * factor) }, () => ({
+      x: sfcRandomRange(rng, 0, this.width), y: sfcRandomRange(rng, 0, this.height),
+      radius: sfcRandomRange(rng, 2, 4), speed: sfcRandomRange(rng, 400, 700),
+    }));
+    this.windStreaks = Array.from({ length: Math.round(30 * factor) }, () => ({
+      x: sfcRandomRange(rng, 0, this.width), y: sfcRandomRange(rng, 0, this.height),
+      length: sfcRandomRange(rng, 20, 60), speed: sfcRandomRange(rng, 200, 420), opacity: sfcRandomRange(rng, 0.1, 0.3),
+    }));
+  }
+
+  renderFrame(dt) {
+    if (this.width === 0 || this.height === 0 || !this.bgCtx || !this.fgCtx) return;
+    this.bgCtx.clearRect(0, 0, this.width, this.height);
+    this.fgCtx.clearRect(0, 0, this.width, this.height);
+    this.drawSky();
+    this.drawCelestial();
+    this.drawClouds(dt);
+    this.drawPrecipitationAndAtmosphere(dt);
+    this.drawLightning(dt);
+  }
+
+  drawSky() {
+    const ctx = this.bgCtx;
+    const cols = this.skyColors();
+    const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
+    gradient.addColorStop(0, cols[0]);
+    gradient.addColorStop(1, cols[1]);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, this.width, this.height);
+  }
+
+  // Mélange les palettes nuit/jour sur la fenêtre de crépuscule civil (±6°) puis superpose
+  // une teinte « golden hour » qui culmine au passage du soleil à l'horizon (aube/crépuscule).
+  skyColors() {
+    const category = this.state.category;
+    const elev = this.state.sunElevation;
+    const palette = SFC_SKY_PALETTES[category] || SFC_SKY_PALETTES.clear;
+    const dayness = sfcClamp((elev + 6) / 12, 0, 1);
+    let top = sfcMixRgb(palette.nightTop, palette.dayTop, dayness);
+    let bottom = sfcMixRgb(palette.nightBottom, palette.dayBottom, dayness);
+    const clear = SFC_SKY_CLEARNESS[category] !== undefined ? SFC_SKY_CLEARNESS[category] : 1;
+    const golden = sfcClamp(1 - Math.abs(elev) / 8, 0, 1) * clear;
+    if (golden > 0) {
+      top = sfcTintRgb(top, SFC_GOLDEN_TOP, golden * 0.5);
+      bottom = sfcTintRgb(bottom, SFC_GOLDEN_HORIZON, golden * 0.9);
+    }
+    return [sfcRgbStr(top), sfcRgbStr(bottom)];
+  }
+
+  drawCelestial() {
+    const s = this.state;
+    if (s.category === 'thunderstorm' || s.category === 'fog' || s.category === 'pouring') return;
+    const ctx = this.bgCtx;
+    if (s.isDay) {
+      // Disque solaire canvas désactivé par défaut : la carte garde son soleil « emoji » + arc.
+      if (!s.drawSun) return;
+      const radius = Math.min(this.width, this.height) * 0.07;
+      const el = sfcClamp(s.sunElevation, 0, 90);
+      const bodyX = this.width * sfcClamp((s.sunAzimuth - 45) / 270, 0, 1);
+      const bodyY = this.height * (0.62 - sfcClamp(el / 60, 0, 1) * 0.46);
+      const warm = sfcClamp(1 - el / 12, 0, 1);
+      const glowRgb = sfcMixRgb('#fff4d6', '#ff9a4a', warm);
+      const sunRgb = sfcMixRgb('#fff6d8', '#ff8a3c', warm);
+      const glow = ctx.createRadialGradient(bodyX, bodyY, 0, bodyX, bodyY, radius * 4);
+      glow.addColorStop(0, sfcRgbaStr(glowRgb, 0.9));
+      glow.addColorStop(1, sfcRgbaStr(glowRgb, 0));
+      ctx.fillStyle = glow; ctx.fillRect(0, 0, this.width, this.height);
+      ctx.beginPath(); ctx.fillStyle = sfcRgbStr(sunRgb);
+      ctx.arc(bodyX, bodyY, radius, 0, Math.PI * 2); ctx.fill();
+    } else if (s.category !== 'cloudy' && s.category !== 'snowy-rainy') {
+      // Nuit dégagée : étoiles scintillantes (la lune « emoji » reste gérée par la carte).
+      for (const star of this.stars) {
+        const twinkle = 0.5 + 0.5 * Math.sin(this.elapsed * 2 + star.phase);
+        ctx.globalAlpha = sfcClamp(twinkle, 0.2, 1) * (1 - s.cloudCoverage / 150);
+        ctx.beginPath(); ctx.fillStyle = '#ffffff';
+        ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  drawClouds(dt) {
+    const cat = this.state.category;
+    if (cat === 'clear') return;
+    const ctx = this.bgCtx;
+    const windFactor = 1 + sfcClamp(this.state.windSpeedKmh, 0, 60) / 60;
+    // Nombre de nuages dessinés = fraction du pool proportionnelle à la couverture nuageuse
+    // (attribut cloud_coverage 0-100 de l'entité weather, sinon estimé depuis la condition).
+    // Plancher pour les ciels nettement couverts afin de garder un ciel plein.
+    let cov = sfcClamp((this.state.cloudCoverage || 0) / 100, 0, 1);
+    if (cat === 'cloudy' || cat === 'rain' || cat === 'pouring' || cat === 'snow'
+        || cat === 'snowy-rainy' || cat === 'hail' || cat === 'thunderstorm' || cat === 'fog') {
+      cov = Math.max(cov, 0.75);
+    }
+    const visible = Math.max(cat === 'partly-cloudy' ? 1 : 0, Math.round(this.clouds.length * cov));
+    for (let i = 0; i < this.clouds.length; i++) {
+      const cloud = this.clouds[i];
+      if (!this.state.reducedMotion) {
+        cloud.x += cloud.speed * windFactor * dt;
+        if (cloud.x > this.width + 150) cloud.x = -150;
+      }
+      if (i >= visible) continue;   // au-delà du quota de couverture → non dessiné
+      const puffRadius = 46 * cloud.scale;
+      const gradient = ctx.createRadialGradient(cloud.x, cloud.y, 0, cloud.x, cloud.y, puffRadius * 2.2);
+      gradient.addColorStop(0, 'rgba(230, 234, 240, ' + cloud.opacity + ')');
+      gradient.addColorStop(1, 'rgba(230, 234, 240, 0)');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.ellipse(cloud.x, cloud.y, puffRadius * 2.2, puffRadius * 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  drawPrecipitationAndAtmosphere(dt) {
+    const cat = this.state.category;
+    const ctx = this.fgCtx;
+    const windAngle = ((this.state.windBearingDeg + 180) * Math.PI) / 180;
+    const windDrift = Math.sin(windAngle) * sfcClamp(this.state.windSpeedKmh, 0, 80) * 1.5;
+
+    if (cat === 'rain' || cat === 'pouring' || cat === 'snowy-rainy' || cat === 'thunderstorm') {
+      ctx.strokeStyle = 'rgba(190, 210, 235, 0.55)';
+      ctx.lineWidth = cat === 'pouring' ? 1.6 : 1;
+      for (const drop of this.rain) {
+        if (!this.state.reducedMotion) {
+          drop.y += drop.speed * dt;
+          drop.x += windDrift * dt * 0.4;
+          if (drop.y > this.height) { drop.y = -20; drop.x = Math.random() * this.width; }
+          if (drop.x > this.width) drop.x = 0;
+          if (drop.x < 0) drop.x = this.width;
+        }
+        ctx.globalAlpha = drop.opacity;
+        ctx.beginPath();
+        ctx.moveTo(drop.x, drop.y);
+        ctx.lineTo(drop.x - windDrift * 0.02, drop.y + drop.length);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (cat === 'snow' || cat === 'snowy-rainy') {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      for (const flake of this.snow) {
+        if (!this.state.reducedMotion) {
+          flake.y += flake.speed * dt;
+          flake.x += Math.sin(this.elapsed * flake.driftSpeed + flake.driftPhase) * 20 * dt + windDrift * dt * 0.2;
+          if (flake.y > this.height) { flake.y = -10; flake.x = Math.random() * this.width; }
+        }
+        ctx.beginPath();
+        ctx.arc(flake.x, flake.y, flake.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    if (cat === 'hail') {
+      ctx.fillStyle = 'rgba(220, 230, 240, 0.9)';
+      for (const stone of this.hail) {
+        if (!this.state.reducedMotion) {
+          stone.y += stone.speed * dt;
+          if (stone.y > this.height) { stone.y = -10; stone.x = Math.random() * this.width; }
+        }
+        ctx.beginPath();
+        ctx.arc(stone.x, stone.y, stone.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    if (cat === 'fog') {
+      for (let i = 0; i < 3; i += 1) {
+        const offset = (this.elapsed * (8 + i * 4)) % (this.width + 300);
+        const gradient = ctx.createLinearGradient(offset - 300, 0, offset, 0);
+        gradient.addColorStop(0, 'rgba(230, 235, 240, 0)');
+        gradient.addColorStop(0.5, 'rgba(230, 235, 240, ' + (0.18 - i * 0.04) + ')');
+        gradient.addColorStop(1, 'rgba(230, 235, 240, 0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, this.height * (0.4 + i * 0.15), this.width, this.height * 0.35);
+      }
+    }
+
+    if (cat === 'windy') {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+      ctx.lineWidth = 1;
+      for (const streak of this.windStreaks) {
+        if (!this.state.reducedMotion) {
+          streak.x += streak.speed * dt;
+          if (streak.x > this.width + 60) streak.x = -60;
+        }
+        ctx.globalAlpha = streak.opacity;
+        ctx.beginPath();
+        ctx.moveTo(streak.x, streak.y);
+        ctx.lineTo(streak.x + streak.length, streak.y + streak.length * 0.08);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  drawLightning(dt) {
+    if (this.state.category !== 'thunderstorm') { this.lightningFlash = 0; return; }
+    if (!this.state.reducedMotion) {
+      this.lightningTimer -= dt;
+      if (this.lightningTimer <= 0) { this.lightningTimer = sfcRandomRange(Math.random, 2.5, 7); this.lightningFlash = 1; }
+      if (this.lightningFlash > 0) this.lightningFlash = sfcClamp(this.lightningFlash - dt * 2.5, 0, 1);
+    }
+    if (this.lightningFlash > 0) {
+      const ctx = this.fgCtx;
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + (this.lightningFlash * 0.45) + ')';
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  SOLAR FLOW CARD ELEMENT
+// ══════════════════════════════════════════════════════════
+class SolarFlowCard extends HTMLElement {
+  // ────────────────────────────────────────────────────────
+  //  CYCLE DE VIE & CONFIG
+  // ────────────────────────────────────────────────────────
+  // Initialise le shadow DOM et l'état interne (timers, accumulateurs économies/routeurs).
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._cfg = {};
+    this._hass = null;
+    this._sunTimer       = null;
+    this._starsCreated   = false;
+    this._lightningTimer = null;
+    // Savings accumulator
+    this._savDay     = null;
+    this._savAccum   = 0;
+    this._savLastPv  = null;
+    this._savLastExp = null;
+    this._rainAnim = null;
+    this._snowAnim = null;
+    this._notifBalanceSentDay = null;
+  }
+
+  // Setter HA : à chaque mise à jour de l'objet hass, rafraîchit toute la carte.
+  set hass(hass) {
+    this._hass = hass;
+    this._update();
+  }
+
+  // Applique la config (fusionnée aux DEFAULTS), (re)génère le DOM et lance le timer soleil.
+  setConfig(config) {
+    this._cfg = { ...DEFAULTS, ...config };
+    this._render();
+    this._startSunTimer();
+  }
+
+  // Fournit l'élément d'édition visuelle (éditeur Lovelace) de la carte.
+  static getConfigElement() {
+    return document.createElement('solar-flow-card-editor');
+  }
+
+  // Config minimale proposée lors de l'ajout de la carte au dashboard.
+  static getStubConfig() {
+    // Pas de coordonnées ici : la carte prend par défaut la localisation de la maison HA.
+    return { title: 'Solar Flow' };
+  }
+
+  // Hauteur estimée (unités Lovelace) pour la mise en page en colonnes.
+  getCardSize() { return 8; }
+
+  // (Re)génère le HTML complet (styles + scène) puis initialise étoiles, GSAP et clics détails.
+  _render() {
+    this._starsCreated = false;
+    this.shadowRoot.innerHTML = `
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;600;700&display=swap');
+        ${CARD_CSS}
+      </style>
+      ${buildCardHTML(this._cfg)}
+    `;
+    this._createStars();
+    this._loadGSAP();
+    this._attachDetail();
+    this._initSceneRenderer();
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  CIEL/MÉTÉO CANVAS (mode single) — cycle de vie du SfcSceneRenderer
+  // ────────────────────────────────────────────────────────
+  // (Re)crée le renderer canvas + ses observers (taille / visibilité) si le mode single
+  // « canvas » est actif. Sans effet dans les autres modes (aucun canvas rendu dans le DOM).
+  _initSceneRenderer() {
+    this._disposeSceneRenderer();
+    const c = this._cfg || {};
+    if (!(c.img_scene_mode === 'single' && c.show_images !== false && c.sky_canvas !== false)) return;
+    const bg = this._el('sfcSkyCanvasBg');
+    const fg = this._el('sfcSkyCanvasFg');
+    const scene = this._el('sfcUnifiedScene');
+    if (!bg || !fg || !scene) return;
+    try { this._sceneRenderer = new SfcSceneRenderer(bg, fg); }
+    catch (e) { this._sceneRenderer = null; return; }
+
+    const applySize = () => {
+      const r = scene.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) this._sceneRenderer.resize(r.width, r.height, window.devicePixelRatio || 1);
+    };
+    applySize();
+    if (typeof ResizeObserver !== 'undefined') {
+      this._sceneResizeObs = new ResizeObserver(() => applySize());
+      this._sceneResizeObs.observe(scene);
+    }
+    if (typeof IntersectionObserver !== 'undefined') {
+      this._sceneIntersectObs = new IntersectionObserver((entries) => {
+        const vis = entries[0] ? entries[0].isIntersecting : true;
+        if (this._sceneRenderer) this._sceneRenderer.setPaused(!vis || document.hidden);
+      }, { threshold: 0.01 });
+      this._sceneIntersectObs.observe(scene);
+    }
+    // État initial (élévation/azimut/météo) puis démarrage de la boucle.
+    this._updateSun();
+    this._sceneRenderer.start();
+  }
+
+  // Arrête et libère le renderer canvas + ses observers.
+  _disposeSceneRenderer() {
+    if (this._sceneResizeObs)    { this._sceneResizeObs.disconnect();    this._sceneResizeObs = null; }
+    if (this._sceneIntersectObs) { this._sceneIntersectObs.disconnect(); this._sceneIntersectObs = null; }
+    if (this._sceneRenderer)     { this._sceneRenderer.dispose();        this._sceneRenderer = null; }
+  }
+
+  // Pousse l'état courant (catégorie météo, jour/nuit, soleil, vent, couverture) au renderer.
+  // Alimenté par _updateSun() ; le vent/couverture viennent des attributs de l'entité weather.
+  _updateSceneRenderer(elevation, azimuth) {
+    if (!this._sceneRenderer) return;
+    const c = this._cfg;
+    const cond = this._getState(c.weather) || '';
+    const wi = getWeather(cond);
+    const wSt = c.weather ? this._hass?.states[c.weather] : null;
+    const wAttr = (wSt && wSt.attributes) ? wSt.attributes : {};
+
+    // Vent → km/h (unité lue sur l'entité, repli sur l'unité système, sinon km/h supposé).
+    let windKmh = parseFloat(wAttr.wind_speed);
+    if (!isFinite(windKmh)) windKmh = 0;
+    const wUnit = String(wAttr.wind_speed_unit || this._hass?.config?.unit_system?.wind_speed || 'km/h').toLowerCase();
+    if (wUnit.includes('m/s')) windKmh *= 3.6;
+    else if (wUnit.includes('mph')) windKmh *= 1.60934;
+    else if (wUnit.includes('kn')) windKmh *= 1.852;   // nœuds
+    let windBearing = parseFloat(wAttr.wind_bearing);
+    if (!isFinite(windBearing)) windBearing = 0;
+
+    // Couverture nuageuse : attribut cloud_coverage (0-100) sinon estimation depuis la condition.
+    let cloudCover = parseFloat(wAttr.cloud_coverage);
+    if (!isFinite(cloudCover)) cloudCover = (wi.cloud || 0) * 100;
+
+    const reduced = (typeof window.matchMedia === 'function')
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    this._sceneRenderer.setState({
+      category: sfcConditionToScene(cond),
+      isDay: elevation >= -3,
+      quality: (['low', 'medium', 'high'].includes(c.sky_quality) ? c.sky_quality : 'medium'),
+      intensity: 1,
+      windSpeedKmh: windKmh,
+      windBearingDeg: windBearing,
+      reducedMotion: !!reduced,
+      cloudCoverage: cloudCover,
+      sunElevation: elevation,
+      sunAzimuth: azimuth,
+      drawSun: false,
+    });
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  PANNEAU DÉTAILS (clic sur une zone)
+  // ────────────────────────────────────────────────────────
+  // Branche les clics : sur une zone [data-detail] → ouvre le panneau ; sur la croix/fond → ferme.
+  _attachDetail() {
+    const root = this._el('sfcRoot');
+    if (root) {
+      root.addEventListener('click', (e) => {
+        if (this._cfg.details_on_click === false) return;
+        const el = e.target.closest && e.target.closest('[data-detail]');
+        if (el) {
+          e.stopPropagation();
+          // Si une option nav_<zone> est définie dans le YAML, le clic navigue vers
+          // cette vue du dashboard au lieu d'ouvrir le panneau de détails interne.
+          // Zones possibles : nav_pv, nav_grid, nav_home, nav_battery, nav_ev, nav_router1..4
+          // Option absente -> comportement d'origine strictement inchangé.
+          const navPath = this._cfg['nav_' + el.dataset.detail];
+          if (navPath) {
+            history.pushState(null, '', navPath);
+            // CustomEvent + detail.replace : format attendu par le routeur de HA
+            // (home-assistant-main lit ev.detail?.replace).
+            window.dispatchEvent(new CustomEvent('location-changed', {
+              detail: { replace: false }, bubbles: true, composed: true,
+            }));
+            return;
+          }
+          this._openDetail(el.dataset.detail);
+        }
+      });
+    }
+    const close = this._el('sfcDetClose');
+    if (close) close.addEventListener('click', () => this._closeDetail());
+    const ov = this._el('sfcDetail');
+    if (ov) ov.addEventListener('click', (e) => { if (e.target === ov) this._closeDetail(); });
+  }
+
+  // Ferme le panneau de détails.
+  _closeDetail() { const el = this._el('sfcDetail'); if (el) el.classList.remove('open'); }
+
+  // Ouvre le panneau de détails d'une zone : liste les entités configurées de la zone + leurs états.
+  _openDetail(zone) {
+    const c = this._cfg, h = this._hass;
+    const el = this._el('sfcDetail');
+    if (!h || !el) return;
+
+    // Groupes d'entités par zone (clés de config). Routeurs gérés dynamiquement.
+    const groups = {
+      pv:      ['pv_power','pv_today','pv_total','pv_month_kwh','pv_year_kwh','pv_forecast_today','pv_forecast_tomorrow'],
+      grid:    ['grid_power','grid_export_today','today_load'],
+      home:    ['home_power','today_load'],
+      battery: ['batt_soc','batt_power','batt_voltage','batt_temp','batt_chg_today','batt_dis_today','remaining','endurance_entity','min_cell','max_cell','batt_soh','batt_full_kwh','batt_cycles','batt_cycles_energy'],
+      ev:      ['ev_power','ev_soc'],
+    };
+    let keys, title;
+    if (zone && zone.indexOf('router') === 0) {
+      const n = zone.slice(6);
+      keys  = ['router'+n+'_power','router'+n+'_opening','router'+n+'_energy','router'+n+'_energy_month','router'+n+'_energy_year','router'+n+'_energy_total','router'+n+'_temp'];
+      title = c['router'+n+'_label'] || ('Routeur ' + n);
+    } else {
+      keys  = groups[zone] || [];
+      title = t(c, 'det_' + zone) || zone;
+    }
+
+    // Construire les lignes depuis les entités configurées (les listes à virgules sont éclatées)
+    const rows = [];
+    const seen = new Set();
+    keys.forEach(k => {
+      const cfgVal = c[k];
+      if (!cfgVal) return;
+      String(cfgVal).split(',').map(s => s.trim()).filter(Boolean).forEach(id => {
+        if (seen.has(id)) return; seen.add(id);
+        const st = h.states[id];
+        if (!st) return;
+        const name = (st.attributes && st.attributes.friendly_name) || id;
+        let disp;
+        try { disp = (typeof h.formatEntityState === 'function')
+                ? h.formatEntityState(st)
+                : st.state + (st.attributes && st.attributes.unit_of_measurement ? ' ' + st.attributes.unit_of_measurement : ''); }
+        catch (e2) { disp = st.state; }
+        rows.push(`<div class="sfc-det-row"><span class="sfc-det-name">${name}</span><span class="sfc-det-val">${disp}</span></div>`);
+      });
+    });
+
+    const titleEl = el.querySelector('.sfc-det-title');
+    const bodyEl  = el.querySelector('.sfc-det-body');
+    if (titleEl) titleEl.textContent = title;
+    if (bodyEl)  bodyEl.innerHTML = rows.length ? rows.join('') : `<div class="sfc-det-row"><span class="sfc-det-name">—</span></div>`;
+    el.classList.add('open');
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  ANIMATIONS (GSAP : chargement, flux, batterie)
+  // ────────────────────────────────────────────────────────
+  // Charge GSAP + DrawSVGPlugin (CDN, une seule fois) puis démarre les animations de flux.
+  _loadGSAP() {
+    if (window.gsap && window.DrawSVGPlugin) {
+      gsap.registerPlugin(DrawSVGPlugin);
+      this._initFlowAnimations();
+      return;
+    }
+    const s1 = document.createElement('script');
+    s1.src = 'https://cdn.jsdelivr.net/npm/gsap@3.15/dist/gsap.min.js';
+    s1.onload = () => {
+      const s2 = document.createElement('script');
+      s2.src = 'https://cdn.jsdelivr.net/npm/gsap@3.15/dist/DrawSVGPlugin.min.js';
+      s2.onload = () => {
+        gsap.registerPlugin(DrawSVGPlugin);
+        this._initFlowAnimations();
+      };
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s1);
+  }
+
+  // Lance les tweens de tous les tubes de flux (segment à vitesse constante) + animations batterie.
+  _initFlowAnimations() {
+    this._gsapReady = true;
+    const sr = this.shadowRoot;
+
+    const animateFlow = (id, duration, delay = 0, segmentSize = 25) => {
+      const el = sr.getElementById(id);
+      if (!el) return;
+      // Réinitialiser le style avant que DrawSVGPlugin calcule la longueur du path
+      el.style.animation = 'none';
+      el.style.strokeDasharray = 'none';
+
+      // Segment de longueur fixe qui balaie le tube à VITESSE CONSTANTE.
+      // La position `p` va de -segment → 100 ; tail/head sont clampés à [0,100]
+      // → le segment apparaît au début et disparaît à la fin sans à-coup,
+      //   et progresse à vitesse uniforme entre les deux (ease:'none').
+      const o = { p: -segmentSize };
+      gsap.to(o, {
+        p: 100,
+        duration,
+        ease: 'none',
+        repeat: -1,
+        delay,
+        onUpdate: () => {
+          const tail = Math.max(0, o.p);
+          const head = Math.min(100, o.p + segmentSize);
+          gsap.set(el, { drawSVG: `${tail}% ${head}%` });
+        },
+      });
+    };
+
+    // Flux grid ↔ maison
+    animateFlow('sfcLGGlow',   1.8, 0,40);
+    animateFlow('sfcLGGlow_s', 1.8, 0,40);
+
+    // Flux maison ↔ batterie
+    animateFlow('sfcLBGlow',   2.1, 0,40);
+    animateFlow('sfcLBGlow_s', 2.1, 0,40);
+
+    // Flux soleil → maison
+    animateFlow('sfcSunFlowGlow',   1.4, 0, 40);   // mode séparé/emoji
+    animateFlow('sfcSunFlowGlow_s', 1.4, 0, 40);   // mode single (chemin fixe 1536×1024)
+
+    // Flux routeurs single-mode
+    animateFlow('sfcLSpaGlow_s',  2.4, 0, 40);
+    animateFlow('sfcLECSGlow_s',  2.2, 0, 40);
+    animateFlow('sfcLEVGlow_s',   1.8, 0, 40);
+
+    // Animation batterie — mode séparé (HTML) et mode single (SVG)
+    this._initBatteryAnimation();
+    this._initBatterySVGAnimation();
+  }
+
+  // Prépare l'animation batterie mode séparé (HTML) : crée 6 bulles de charge (particules DOM).
+  _initBatteryAnimation() {
+    if (!window.gsap || this._battAnimReady) return;
+    const wrapper    = this._el('sfcBattWrapper');
+    if (!wrapper) return;
+    const liquidWrap = wrapper.querySelector('.sfc-batt-liquid-wrap');
+    if (!liquidWrap) return;
+
+    // Créer 6 bulles de charge (particules DOM)
+    this._bubbles = Array.from({ length: 6 }, () => {
+      const b  = document.createElement('div');
+      const sz = (2.5 + Math.random() * 3).toFixed(1);
+      b.style.cssText = [
+        'position:absolute', 'border-radius:50%', 'z-index:2',
+        'opacity:0', 'pointer-events:none', 'will-change:transform,opacity',
+        `width:${sz}px`, `height:${sz}px`,
+        `left:${(10 + Math.random() * 80).toFixed(0)}%`,
+        'bottom:4%',
+      ].join(';');
+      liquidWrap.appendChild(b);
+      return b;
+    });
+
+    this._battAnimReady = true;
+    this._prevBattSoc   = -1;
+    this._bubbleTls     = null;
+    this._battGlowTl    = null;
+  }
+
+  // Anime la batterie mode séparé : niveau liquide élastique, vitesse de vague, glow, bulles.
+  _updateBatteryGSAP(soc, state) {
+    if (!window.gsap) return;
+    if (!this._battAnimReady) { this._initBatteryAnimation(); if (!this._battAnimReady) return; }
+
+    const liquid     = this._el('sfcBattLiquid');
+    const wave       = this._el('sfcBattWave');
+    const img        = this._el('sfcBattImg');
+    const wrapper    = this._el('sfcBattWrapper');
+    const liquidWrap = wrapper?.querySelector('.sfc-batt-liquid-wrap');
+
+    // ── 1. Niveau liquide avec physique élastique ─────────────────────────
+    const rising = soc > this._prevBattSoc && this._prevBattSoc >= 0;
+    this._prevBattSoc = soc;
+    const h    = Math.round(soc) + '%';
+    const ease = rising ? 'elastic.out(1, 0.38)' : 'power2.out';
+    const dur  = rising ? 2.8 : 1.6;
+    if (liquid) gsap.to(liquid, { height: h, duration: dur, ease, overwrite: 'auto' });
+    if (wave)   gsap.to(wave,   { height: h, duration: dur + 0.15, ease, overwrite: 'auto' });
+
+    // ── 2. Vitesse de vague selon puissance ───────────────────────────────
+    if (wave) {
+      const spd = state === 'charging' ? '1.3s' : state === 'discharging' ? '2.0s' : '3.8s';
+      wave.style.setProperty('--wave-spd', spd);
+    }
+
+    // ── 3. Glow pulsé sur l'image batterie ───────────────────────────────
+    if (img) {
+      if (this._battGlowTl) { this._battGlowTl.kill(); this._battGlowTl = null; }
+      const base = 'drop-shadow(0 4px 16px rgba(0,0,0,0.6))';
+      if (state === 'charging') {
+        this._battGlowTl = gsap.timeline({ repeat: -1 })
+          .to(img, { filter: `${base} drop-shadow(0 0 22px rgba(105,255,71,1))`,    duration: 0.8, ease: 'sine.inOut' })
+          .to(img, { filter: `${base} drop-shadow(0 0 5px rgba(105,255,71,0.25))`,  duration: 0.8, ease: 'sine.inOut' });
+      } else if (state === 'discharging') {
+        this._battGlowTl = gsap.timeline({ repeat: -1 })
+          .to(img, { filter: `${base} drop-shadow(0 0 18px rgba(255,120,0,0.9))`,   duration: 1.1, ease: 'sine.inOut' })
+          .to(img, { filter: `${base} drop-shadow(0 0 4px rgba(255,120,0,0.2))`,    duration: 1.1, ease: 'sine.inOut' });
+      } else if (state === 'low') {
+        this._battGlowTl = gsap.timeline({ repeat: -1 })
+          .to(img, { filter: `${base} drop-shadow(0 0 26px rgba(255,40,40,1))`,     duration: 0.3, ease: 'power2.in'  })
+          .to(img, { filter: `${base} drop-shadow(0 0 4px rgba(255,40,40,0.15))`,   duration: 0.3, ease: 'power2.out' })
+          .to({},  { duration: 0.5 });
+      } else {
+        gsap.to(img, { filter: base, duration: 1.0, overwrite: 'auto' });
+      }
+    }
+
+    // ── 4. Bulles de charge ascendantes ──────────────────────────────────
+    if (this._bubbles) {
+      if (state === 'charging') {
+        if (!this._bubbleTls) {
+          const wrapH = liquidWrap?.offsetHeight || 42;
+          this._bubbles.forEach(b => { b.style.background = 'rgba(200,255,200,0.6)'; });
+          this._bubbleTls = this._bubbles.map((b, i) => {
+            const travel = -(wrapH * 0.86);
+            const dur    = 1.0 + Math.random() * 0.9;
+            const pause  = 0.4 + Math.random() * 1.1;
+            const tl = gsap.timeline({ repeat: -1, delay: i * 0.38 + Math.random() * 0.25 });
+            tl.set(b, { y: 0, opacity: 0 })
+              .to(b, { opacity: 0.8, duration: 0.12 })
+              .to(b, { y: travel, opacity: 0, duration: dur, ease: 'power1.out' })
+              .set(b, { y: 0 })
+              .to({}, { duration: pause });
+            return tl;
+          });
+        }
+      } else {
+        if (this._bubbleTls) {
+          this._bubbleTls.forEach(tl => tl.kill());
+          this._bubbleTls = null;
+          gsap.to(this._bubbles, { opacity: 0, duration: 0.3, overwrite: 'auto' });
+        }
+      }
+    }
+  }
+
+  // Prépare l'animation batterie mode single (SVG) : bulles dans le cylindre + vagues de surface.
+  _initBatterySVGAnimation() {
+    if (!window.gsap || this._battSVGAnimReady) return;
+    const svgEl = this._el('sfcSingleFlowSvg');
+    if (!svgEl) return;
+
+    // 5 bulles SVG dans le cylindre (clipPath les confine)
+    const NS = 'http://www.w3.org/2000/svg';
+    this._svgBubbles = Array.from({ length: 5 }, () => {
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('r',           (1.8 + Math.random() * 2.8).toFixed(1));
+      c.setAttribute('cx',          (this._gaugeOrigin()[0] + 7 + Math.random() * 59).toFixed(0));
+      c.setAttribute('cy',          String(this._gaugeOrigin()[1] + 110));
+      c.setAttribute('fill',        'rgba(200,255,200,0.62)');
+      c.setAttribute('opacity',     '0');
+      c.setAttribute('clip-path',   'url(#sfcSVBattClip)');
+      svgEl.appendChild(c);
+      return c;
+    });
+
+    this._battSVGAnimReady = true;
+    this._prevBattSVGSoc   = -1;
+    this._svgBubbleTls     = null;
+
+    // Vagues de surface — chaque point oscille via un tween GSAP sine.inOut (logique canvas de réf.)
+    this._initWaveTweens();
+    this._battWaveTick = () => this._drawBattWaves();
+    gsap.ticker.add(this._battWaveTick);
+  }
+
+  // Crée les points oscillants (tweens sine.inOut décalés) + respiration d'amplitude
+  _initWaveTweens() {
+    if (!window.gsap) return;
+    if (this._waveTweens) { this._waveTweens.forEach(t => t.kill()); }
+    const SEG = 40;   // échantillonnage fin → courbes lisses (comme les 100 segments de la réf.)
+    this._waveSeg = SEG;
+    // 3 vagues : fréquences BASSES = ondulations longues et douces (réf. 0.5–2.5)
+    this._waves = [
+      { id:'sfcSVWaveA', freq:0.5, dur:4.5, light:0,    alpha:0.95, dy:0,  amp:7,  ampTo:7,  ampDur:3.0, grad:null }, // 1er plan : foncée + opaque (corps)
+      { id:'sfcSVWaveB', freq:1.0, dur:3.6, light:0.35, alpha:0.80, dy:-2, amp:5,  ampTo:7,  ampDur:3.6, grad:'sfcSVWaveGradB' }, // milieu : moyenne (fondue)
+      { id:'sfcSVWaveC', freq:0.8, dur:5.2, light:0.60, alpha:0.70, dy:-3, amp:4,  ampTo:7,  ampDur:4.0, grad:'sfcSVWaveGradC' }, // arrière : claire (fondue)
+    ];
+    this._waveTweens = [];
+    this._waves.forEach(wv => {
+      wv.points = [];
+      for (let i = 0; i <= SEG; i++) {
+        const norm = i / SEG;
+        const pt = { y: 1 };
+        const tw = gsap.to(pt, { y: -1, duration: wv.dur, repeat: -1, yoyo: true, ease: 'sine.inOut' });
+        tw.progress((norm * wv.freq) % 1);   // décalage de phase spatial
+        wv.points.push(pt);
+        this._waveTweens.push(tw);
+      }
+      // Respiration de l'amplitude (comme gsap.to(wave,{amplitude...}) dans la réf.)
+      if (wv.ampTo !== wv.amp) {
+        this._waveTweens.push(
+          gsap.to(wv, { amp: wv.ampTo, duration: wv.ampDur, repeat: -1, yoyo: true, ease: 'sine.inOut' })
+        );
+      }
+    });
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  BATTERIE — couleurs & vagues SVG
+  // ────────────────────────────────────────────────────────
+  // Éclaircit une couleur "r,g,b" vers le blanc (t : 0 = inchangé, 1 = blanc)
+  _lighten(rgb, t) {
+    const p = rgb.split(',').map(Number);
+    return p.map(c => Math.round(c + (255 - c) * t)).join(',');
+  }
+  // Assombrit une couleur "r,g,b" vers le noir
+  _darken(rgb, t) {
+    return rgb.split(',').map(c => Math.round(Number(c) * (1 - t))).join(',');
+  }
+  // Couleur "r,g,b" selon le niveau de charge (%) : rouge → orange → jaune → vert (continu)
+  _battLevelRGB(soc) {
+    const stops = [
+      [0,   [225, 45, 45]],   // rouge
+      [20,  [255, 95, 35]],   // rouge-orangé
+      [40,  [255, 160, 0]],   // orange
+      [60,  [255, 215, 0]],   // jaune
+      [80,  [150, 220, 40]],  // vert-jaune
+      [100, [60, 210, 70]],   // vert
+    ];
+    soc = Math.max(0, Math.min(100, soc || 0));
+    for (let i = 1; i < stops.length; i++) {
+      if (soc <= stops[i][0]) {
+        const p0 = stops[i-1][0], c0 = stops[i-1][1];
+        const p1 = stops[i][0],   c1 = stops[i][1];
+        const t = (soc - p0) / (p1 - p0);
+        return c0.map((c, j) => Math.round(c + (c1[j] - c) * t)).join(',');
+      }
+    }
+    return stops[stops.length - 1][1].join(',');
+  }
+
+  // Coin haut-gauche du cylindre de la jauge batterie (scene_layout.battery_gauge)
+  _gaugeOrigin() {
+    const g = sceneLayout(this._cfg).battery_gauge;
+    return g || SCENE_LAYOUT_DEFAULTS.battery_gauge;
+  }
+
+  // Dessine 3 vagues (points oscillants via tweens GSAP) sur la surface du liquide
+  _drawBattWaves() {
+    const fill = this._el('sfcSVBattFill');
+    if (!fill || !this._waves) return;
+    const rectTop = parseFloat(fill.getAttribute('y'));   // le rect est descendu de 5
+    const h       = parseFloat(fill.getAttribute('height'));
+    if (isNaN(rectTop) || isNaN(h) || h < 2) {
+      this._waves.forEach(wv => { const el = this._el(wv.id); if (el) el.setAttribute('d', ''); });
+      return;
+    }
+    const surface = rectTop - 5;       // niveau moyen réel du liquide
+    const SEG = this._waveSeg, x0 = this._gaugeOrigin()[0] + 2, w = 71;
+    const rgb = this._battWaveColor || '0,220,255';
+    this._waves.forEach(wv => {
+      const el = this._el(wv.id); if (!el) return;
+      const half = wv.amp / 2;
+      const sY   = surface + wv.dy;
+      // Coordonnées des points
+      const pts = [];
+      for (let i = 0; i <= SEG; i++) {
+        pts.push([x0 + w * i / SEG, sY + wv.points[i].y * half]);   // point.y ∈ [-1,1] tweené sine.inOut
+      }
+      // Surface lissée : Bézier quadratiques (point = contrôle, milieu = arrivée) → courbes organiques
+      let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const xc = (pts[i][0] + pts[i + 1][0]) / 2;
+        const yc = (pts[i][1] + pts[i + 1][1]) / 2;
+        d += ` Q ${pts[i][0].toFixed(1)} ${pts[i][1].toFixed(1)} ${xc.toFixed(1)} ${yc.toFixed(1)}`;
+      }
+      d += ` L ${pts[pts.length - 1][0].toFixed(1)} ${pts[pts.length - 1][1].toFixed(1)}`;
+      // Vague A = corps COMPLET (jusqu'au fond du cylindre) ; B/C = bandes fines par-dessus
+      const bottomY = wv.id === 'sfcSVWaveA' ? 614
+                    : wv.id === 'sfcSVWaveB' ? surface + 10
+                    :                          surface + 8;
+      d += ` L ${x0 + w} ${bottomY} L ${x0} ${bottomY} Z`;
+      el.setAttribute('d', d);
+      // Vague A : même dégradé que le réservoir (couvre le rect → pas de chevauchement/scintillement)
+      // B/C : dégradé fondu vers transparent (accents, pas de bord plat)
+      const lr = this._lighten(rgb, wv.light);
+      if (wv.id === 'sfcSVWaveA') {
+        el.setAttribute('fill', 'url(#sfcSVGradLevel)');
+      } else if (wv.grad) {
+        const top = this._el(wv.grad + 'Top');
+        const bot = this._el(wv.grad + 'Bot');
+        if (top) top.setAttribute('stop-color', `rgba(${lr},${wv.alpha})`);
+        if (bot) bot.setAttribute('stop-color', `rgba(${lr},0)`);
+        el.setAttribute('fill', `url(#${wv.grad})`);
+      } else {
+        el.setAttribute('fill', `rgba(${lr},${wv.alpha})`);
+      }
+    });
+  }
+
+  // Couleur RGB des vagues selon l'état de charge/décharge
+  _battWaveRGB(state) {
+    // = couleur du stop 0% des gradients du liquide → raccord sans couture
+    return state === 'charging'    ? '105,255,71'
+         : state === 'discharging' ? '255,180,0'
+         : state === 'low'         ? '255,80,80'
+         :                           '0,220,255';
+  }
+
+  // Anime la batterie mode single (SVG) : niveau élastique, couleur selon %, pulse/clignotement, bulles.
+  _updateBatterySVGGSAP(battSoc, state) {
+    if (!window.gsap) return;
+    if (!this._battSVGAnimReady) { this._initBatterySVGAnimation(); if (!this._battSVGAnimReady) return; }
+
+    const svFill  = this._el('sfcSVBattFill');
+    const svWave1 = this._el('sfcSVBattWave1');
+    const svWave2 = this._el('sfcSVBattWave2');
+
+    // ── 1. Niveau liquide avec physique élastique ─────────────────────────
+    const maxH   = 110;
+    const fillH  = Math.round(maxH * battSoc / 100);
+    const fillY  = this._gaugeOrigin()[1] + 2 + (maxH - fillH);
+    const rising = battSoc > this._prevBattSVGSoc && this._prevBattSVGSoc >= 0;
+    this._prevBattSVGSoc = battSoc;
+
+    const ease = rising ? 'elastic.out(1, 0.38)' : 'power2.out';
+    const dur  = rising ? 2.8 : 1.6;
+
+    // Rect descendu de 5 (AMP) pour laisser les creux de vague visibles au-dessus
+    if (svFill) gsap.to(svFill, { attr: { y: fillY + 5, height: Math.max(0, fillH - 5) }, duration: dur, ease, overwrite: 'auto' });
+
+    // ── 3. Couleur selon le NIVEAU de charge (%) + classe CSS pour le pulse ──
+    if (svFill) {
+      const levelRGB = this._battLevelRGB(battSoc);
+      this._battWaveColor = levelRGB;               // vagues = couleur du niveau
+      const gTop = this._el('sfcSVGradLevelTop');
+      const gBot = this._el('sfcSVGradLevelBot');
+      if (gTop) gTop.setAttribute('stop-color', `rgba(${levelRGB},0.92)`);
+      if (gBot) gBot.setAttribute('stop-color', `rgb(${this._darken(levelRGB, 0.4)})`);
+      svFill.setAttribute('fill', 'url(#sfcSVGradLevel)');
+      // Classe = pulse charge / clignotement faible (le sens du flux garde son indication)
+      svFill.setAttribute('class', state === 'low' ? 'sv-low' : state === 'charging' ? 'sv-charging' : '');
+    }
+
+    // ── 4. Bulles de charge ascendantes ──────────────────────────────────
+    if (this._svgBubbles) {
+      if (state === 'charging') {
+        if (!this._svgBubbleTls) {
+          this._svgBubbleTls = this._svgBubbles.map((b, i) => {
+            const dur2  = 1.1 + Math.random() * 1.0;
+            const pause = 0.4 + Math.random() * 1.3;
+            const tl = gsap.timeline({ repeat: -1, delay: i * 0.42 + Math.random() * 0.3 });
+            tl.set(b,   { attr: { cy: this._gaugeOrigin()[1] + 108 }, opacity: 0 })
+              .to(b,    { opacity: 0.78, duration: 0.12 })
+              .to(b,    { attr: { cy: this._gaugeOrigin()[1] + 7 }, opacity: 0, duration: dur2, ease: 'power1.out' })
+              .set(b,   { attr: { cy: this._gaugeOrigin()[1] + 108 } })
+              .to({},   { duration: pause });
+            return tl;
+          });
+        }
+      } else {
+        if (this._svgBubbleTls) {
+          this._svgBubbleTls.forEach(tl => tl.kill());
+          this._svgBubbleTls = null;
+          gsap.to(this._svgBubbles, { opacity: 0, duration: 0.3, overwrite: 'auto' });
+        }
+      }
+    }
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  BLOC EV (véhicule électrique)
+  // ────────────────────────────────────────────────────────
+  // Met à jour le bloc EV : flux charge/V2H, chip puissance/SOC, section dédiée (état, kWh).
+  _updateEV() {
+    const c = this._cfg;
+    if (!c.ev_enabled) return;
+
+    const evW    = this._getNum(c.ev_power);
+    const evSoc  = c.ev_soc ? this._getNum(c.ev_soc) : null;
+    const active = Math.abs(evW) >= 50;
+    const isV2H  = evW < -50;   // décharge vers la maison
+
+    // Flux SVG single-mode (bidirectionnel)
+    const evIds = ['sfcLEV_s','sfcLEVTailLong_s','sfcLEVTailMid_s','sfcLEVGlow_s'];
+    this._setFlowActive(evIds, active);
+    if (active && c.img_scene_mode === 'single') {
+      // Inverser le chemin selon direction charge/V2H
+      this._setFlowPath(evIds, scenePath(sceneLayout(c).flow_ev, isV2H));
+    }
+
+    // Chip SVG — puissance ± et SOC
+    const pwrEl = this._el('sfcSGEVPwr');
+    if (pwrEl) {
+      const abs  = Math.abs(evW);
+      const sign = isV2H ? '−' : evW > 50 ? '+' : '';
+      pwrEl.textContent = abs >= 1000 ? sign + (abs/1000).toFixed(2) + ' kW' : sign + Math.round(abs) + ' W';
+      const evCol = c.color_ev || '#4FC3F7';
+      pwrEl.style.fill  = isV2H ? '#69FF47' : evCol;
+      pwrEl.style.filter= isV2H
+        ? 'drop-shadow(0 0 4px #69FF47)'
+        : `drop-shadow(0 0 4px ${evCol})`;
+    }
+
+    const socEl = this._el('sfcSGEVSoc');
+    if (socEl && evSoc !== null) {
+      socEl.textContent = Math.round(evSoc) + ' %';
+    }
+
+    // ── Section EV dédiée (toutes les infos utiles) ──
+    const evCol = c.color_ev || '#4FC3F7';
+    const stEl = this._el('sfcEvSecState');
+    if (stEl) {
+      stEl.textContent = isV2H ? t(c, 'ev_st_v2h') : (evW > 50 ? t(c, 'ev_st_charge') : t(c, 'ev_st_idle'));
+      stEl.style.color = isV2H ? '#69FF47' : (evW > 50 ? evCol : 'var(--muted)');
+    }
+    const secPwr = this._el('sfcEvSecPwr');
+    if (secPwr) {
+      const abs = Math.abs(evW);
+      const sign = isV2H ? '−' : evW > 50 ? '+' : '';
+      secPwr.textContent = abs >= 1000 ? sign + (abs / 1000).toFixed(2) + ' kW' : sign + Math.round(abs) + ' W';
+      secPwr.style.color = isV2H ? '#69FF47' : evCol;
+    }
+    const secSoc = this._el('sfcEvSecSoc');
+    if (secSoc && evSoc !== null) secSoc.textContent = Math.round(evSoc) + ' %';
+    const secKwh = this._el('sfcEvSecKwh');
+    if (secKwh) {
+      const maxKwh = parseFloat(c.ev_max_kwh) || 0;
+      if (maxKwh > 0 && evSoc !== null) {
+        secKwh.textContent = (maxKwh * evSoc / 100).toFixed(1) + ' / ' + maxKwh.toFixed(0) + ' kWh';
+      } else if (maxKwh > 0) {
+        secKwh.textContent = maxKwh.toFixed(0) + ' kWh';
+      }
+    }
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  TARIFICATION (HC/HP, prix courant)
+  // ────────────────────────────────────────────────────────
+  // Période heures creuses, selon hc_start / hc_end (gère le passage de minuit).
+  _isHCPeriod() {
+    const c = this._cfg;
+    const h = new Date().getHours();
+    let s = parseInt(c.hc_start); if (isNaN(s)) s = 22;
+    let e = parseInt(c.hc_end);   if (isNaN(e)) e = 6;
+    return s <= e ? (h >= s && h < e) : (h >= s || h < e);
+  }
+
+  // Prix courant €/kWh selon le mode tarifaire : Tempo / HP-HC / entité dynamique / prix fixe.
+  _getCurrentPrice() {
+    const c = this._cfg;
+    const mode = c.price_mode || 'fixed';
+
+    // Tempo EDF : couleur du jour pour le badge + prix
+    if (mode === 'tempo') {
+      // Si une entité prix dynamique est fournie, elle a priorité sur les tables fixes
+      if (c.price_entity) {
+        const p = this._getNum(c.price_entity);
+        if (p > 0) return p;
+      }
+      // Sinon, tables de prix fixes selon la couleur + HC/HP
+      if (c.tempo_color) {
+        const raw = (this._getState(c.tempo_color) || '').toLowerCase();
+        const isHC = this._isHCPeriod();
+        const map = {
+          blue: ['tempo_blue_hc','tempo_blue_hp'], bleu:  ['tempo_blue_hc','tempo_blue_hp'],
+          white:['tempo_white_hc','tempo_white_hp'],blanc: ['tempo_white_hc','tempo_white_hp'],
+          red:  ['tempo_red_hc','tempo_red_hp'],   rouge: ['tempo_red_hc','tempo_red_hp'],
+        };
+        const keys = map[raw];
+        if (keys) return parseFloat(c[isHC ? keys[0] : keys[1]]) || (isHC ? 0.1296 : 0.1609);
+      }
+    }
+
+    // Heures Pleines / Heures Creuses
+    if (mode === 'hphc') {
+      return this._isHCPeriod()
+        ? (parseFloat(c.hc_price) || 0.20)
+        : (parseFloat(c.hp_price) || 0.27);
+    }
+
+    // Entité dynamique
+    if (mode === 'entity' && c.price_entity) {
+      const p = this._getNum(c.price_entity);
+      if (p > 0) return p;
+    }
+
+    // Prix fixe (défaut / fallback)
+    return parseFloat(c.electricity_price) || 0.23;
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  BLOC AUTOCONSOMMATION
+  // ────────────────────────────────────────────────────────
+  // Calcule les taux d'autoconsommation (PV consommé/produit) et d'autoproduction (couverture conso).
+  _updateAutoConso() {
+    const c = this._cfg;
+    if (c.show_autoconso === false || !c.pv_today) return;
+    const pv   = this._getNum(c.pv_today);
+    const exp  = c.grid_export_today ? Math.max(0, this._getNum(c.grid_export_today)) : null;
+    const imp  = c.grid_import_today ? Math.max(0, this._getNum(c.grid_import_today)) : null;
+    const load = c.today_load ? this._getNum(c.today_load) : null;
+    // Autoconsommation = part du PV consommée sur place (directe + stockée batterie) = (PV − injection) / PV
+    const selfUsed  = exp === null ? null : Math.max(0, pv - exp);
+    const selfConso = (selfUsed !== null && pv > 0) ? Math.min(100, selfUsed / pv * 100) : null;
+    // Autonomie (taux de couverture) = part de la conso NON soutirée au réseau = (conso − import) / conso.
+    // Tient compte de la batterie (sa décharge évite de l'import). L'ancienne formule (PV−injection)/conso
+    // comptait à tort l'énergie chargée en batterie comme déjà consommée → autonomie surévaluée.
+    const selfProd  = (load !== null && imp !== null && load > 0) ? Math.min(100, Math.max(0, load - imp) / load * 100) : null;
+    this._setAutoBar('sfcSelfConsoBar', 'sfcSelfConsoVal', selfConso);
+    this._setAutoBar('sfcSelfProdBar',  'sfcSelfProdVal',  selfProd);
+  }
+
+  // Met à jour une barre + sa valeur d'autoconso (couleur selon le niveau, « — % » si indisponible).
+  _setAutoBar(barId, valId, pct) {
+    const bar = this._el(barId), val = this._el(valId);
+    if (pct === null) {
+      if (val) { val.textContent = '— %'; val.className = 'sfc-health-val'; }
+      if (bar) { bar.style.width = '0%'; bar.className = 'sfc-health-bar'; }
+      return;
+    }
+    const cls = pct >= 70 ? 'good' : pct >= 40 ? 'mid' : 'low';   // + c'est haut, mieux c'est
+    if (val) { val.textContent = Math.round(pct) + ' %'; val.className = 'sfc-health-val soh-' + cls; }
+    if (bar) { bar.style.width = pct.toFixed(0) + '%'; bar.className = 'sfc-health-bar soh-' + cls + '-bg'; }
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  BLOC BILAN & PERFORMANCE
+  // ────────────────────────────────────────────────────────
+  // Bilan énergétique du jour + note de l'installation. Utilise les entités présentes et
+  // s'adapte aux cas partiels (sans PV, sans batterie, sans import…) :
+  //   • Autoconsommation = (PV − injection) / PV
+  //   • Autonomie        = (conso − import) / conso   (la décharge batterie évite de l'import)
+  //   • Note /100        = moyenne des taux disponibles → lettre A→E + qualificatif
+  //   • Répartition Production (autoconso. dont stockée / injectée) et Consommation (solaire / batterie / réseau)
+  _updateBalance() {
+    const c = this._cfg;
+    if (c.show_balance === false) return;
+    const num = k => c[k] ? Math.max(0, this._getNum(c[k])) : null;
+    const pv = num('pv_today'), exp = num('grid_export_today'), imp = num('grid_import_today');
+    const load = num('today_load'), chg = num('batt_chg_today'), dis = num('batt_dis_today');
+    const fmt = v => v == null ? '—' : (v >= 1000 ? (v/1000).toFixed(2)+' MWh' : v.toFixed(2)+' kWh');
+
+    // Taux
+    const autoConso = (pv !== null && exp !== null && pv > 0) ? Math.min(100, Math.max(0, pv - exp) / pv * 100) : null;
+    const autonomy  = (load !== null && imp !== null && load > 0) ? Math.min(100, Math.max(0, load - imp) / load * 100) : null;
+    const acEl = this._el('sfcBalAutoConso'); if (acEl) acEl.textContent = autoConso !== null ? Math.round(autoConso)+' %' : '— %';
+    const auEl = this._el('sfcBalAutonomie'); if (auEl) auEl.textContent = autonomy  !== null ? Math.round(autonomy)+' %' : '— %';
+
+    // Note /100 = moyenne des taux disponibles → lettre + couleur + qualificatif
+    const parts = [autoConso, autonomy].filter(v => v !== null);
+    const score = parts.length ? Math.round(parts.reduce((a, b) => a + b, 0) / parts.length) : null;
+    const g = score === null ? ['—', '', '']
+            : score >= 80 ? ['A', 'bal_q_excellent', 'soh-good']
+            : score >= 65 ? ['B', 'bal_q_verygood',  'soh-good']
+            : score >= 50 ? ['C', 'bal_q_good',      'soh-mid']
+            : score >= 35 ? ['D', 'bal_q_average',   'soh-mid']
+            :               ['E', 'bal_q_low',       'soh-low'];
+    const gEl = this._el('sfcBalGrade'); if (gEl) gEl.className = 'sfc-bal-letter' + (g[2] ? ' ' + g[2] : '');
+    if (gEl) gEl.textContent = g[0];
+    const sEl = this._el('sfcBalScore'); if (sEl) sEl.textContent = score !== null ? score + '/100' : '—/100';
+    const qEl = this._el('sfcBalQual');  if (qEl) qEl.textContent = g[1] ? t(c, g[1]) : '';
+
+    // Répartition Production : autoconsommée (dont stockée batterie) + injectée
+    const prodRow = this._el('sfcBalProdRow');
+    if (prodRow) {
+      if (pv !== null && pv > 0) {
+        prodRow.style.display = '';
+        const tot = this._el('sfcBalProdTot'); if (tot) tot.textContent = fmt(pv);
+        const selfUsed = exp !== null ? Math.max(0, pv - exp) : null;
+        const segs = [];
+        if (selfUsed !== null) {
+          let s = `☀️ ${t(c,'bal_self')} ${fmt(selfUsed)}`;
+          if (chg !== null && chg > 0) s += ` <span class="sfc-bal-dim">(🔋 ${t(c,'bal_stored')} ${fmt(Math.min(chg, selfUsed))})</span>`;
+          segs.push(s);
+        }
+        if (exp !== null) segs.push(`↑ ${t(c,'bal_injected')} ${fmt(exp)}`);
+        const b = this._el('sfcBalProd'); if (b) b.innerHTML = segs.join(' · ');
+      } else prodRow.style.display = 'none';
+    }
+
+    // Répartition Consommation : solaire directe + batterie + réseau
+    const consoRow = this._el('sfcBalConsoRow');
+    if (consoRow) {
+      if (load !== null && load > 0) {
+        consoRow.style.display = '';
+        const tot = this._el('sfcBalConsoTot'); if (tot) tot.textContent = fmt(load);
+        const selfUsed = (pv !== null && exp !== null) ? Math.max(0, pv - exp) : null;
+        // Solaire directe = autoconsommé − stocké (l'énergie stockée revient via la décharge batterie)
+        const pvDirect = (selfUsed !== null && chg !== null) ? Math.max(0, selfUsed - chg) : selfUsed;
+        const segs = [];
+        if (pvDirect !== null) segs.push(`☀️ ${t(c,'bal_solar')} ${fmt(pvDirect)}`);
+        if (dis !== null) segs.push(`🔋 ${t(c,'bal_battery')} ${fmt(dis)}`);
+        if (imp !== null) segs.push(`🔌 ${t(c,'bal_grid')} ${fmt(imp)}`);
+        const b = this._el('sfcBalConso'); if (b) b.innerHTML = segs.join(' · ');
+      } else consoRow.style.display = 'none';
+    }
+
+    // Notification persistante quotidienne (si activée) — même données que le bloc affiché.
+    this._maybeSendBalanceNotification({ pv, exp, imp, load, chg, dis, autoConso, autonomy, score, grade: g[0] });
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  NOTIFICATION PERSISTANTE — BILAN QUOTIDIEN
+  // ────────────────────────────────────────────────────────
+  // Envoie une notification persistante HA (persistent_notification.create) avec le bilan du
+  // jour, à l'heure configurée (`notif_balance_time`), une seule fois par jour. Contrôlé par
+  // le toggle `notif_balance_enabled` (à la main du gestionnaire du dashboard). Ne se déclenche
+  // que si cette carte est effectivement affichée dans un navigateur à cet instant précis.
+  _maybeSendBalanceNotification(d) {
+    const c = this._cfg;
+    if (!c.notif_balance_enabled || !this._hass || typeof this._hass.callService !== 'function') return;
+
+    const timeStr = String(c.notif_balance_time || '23:59');
+    const m = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+    const targetH = m ? parseInt(m[1], 10) : 23;
+    const targetM = m ? parseInt(m[2], 10) : 59;
+    const now = new Date();
+    if (now.getHours() !== targetH || now.getMinutes() !== targetM) return;
+
+    // Garde-fou anti-doublon : une seule notif par jour, persistée pour survivre à un reload.
+    const dayKey = now.toDateString();
+    const storageKey = 'sfc_notif_balance_' + (c.title || 'default');
+    if (this._notifBalanceSentDay === dayKey) return;
+    try {
+      if (localStorage.getItem(storageKey) === dayKey) { this._notifBalanceSentDay = dayKey; return; }
+    } catch (e) { /* localStorage indispo → repli sur le flag mémoire seul */ }
+
+    const fmt = v => v == null ? '—' : v.toFixed(2) + ' kWh';
+    const lines = [];
+    if (d.pv   !== null) lines.push(`☀️ ${t(c,'notif_balance_line_pv')} : ${fmt(d.pv)}`);
+    if (d.load !== null) lines.push(`🏠 ${t(c,'notif_balance_line_conso')} : ${fmt(d.load)}`);
+    if (d.imp  !== null) lines.push(`🔌 ${t(c,'notif_balance_line_import')} : ${fmt(d.imp)}`);
+    if (d.exp  !== null) lines.push(`↑ ${t(c,'notif_balance_line_export')} : ${fmt(d.exp)}`);
+    if (d.chg  !== null || d.dis !== null) lines.push(`🔋 ${t(c,'notif_balance_line_batt')} : ${fmt(d.chg)} / ${fmt(d.dis)}`);
+    if (d.autoConso !== null) lines.push(`${t(c,'lbl_selfconso')} : ${Math.round(d.autoConso)} %`);
+    if (d.autonomy  !== null) lines.push(`${t(c,'lbl_selfprod')} : ${Math.round(d.autonomy)} %`);
+    if (d.score !== null) lines.push(`${t(c,'bal_note')} : ${d.grade} (${d.score}/100)`);
+
+    const title   = `${t(c,'section_balance')} — ${now.toLocaleDateString(c.language === 'en' ? 'en-GB' : 'fr-FR')}`;
+    const message = lines.length ? lines.join('\n') : '—';
+
+    this._hass.callService('persistent_notification', 'create', {
+      title,
+      message,
+      notification_id: 'sfc_bilan_' + String(c.title || 'default').replace(/[^a-z0-9]+/gi, '_').toLowerCase(),
+    });
+
+    this._notifBalanceSentDay = dayKey;
+    try { localStorage.setItem(storageKey, dayKey); } catch (e) { /* ignore */ }
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  BLOC SANTÉ BATTERIE
+  // ────────────────────────────────────────────────────────
+  // Bloc santé batterie : SOH, capacité réelle/théorique, cycles (mesurés ou estimés EFC).
+  _updateHealth() {
+    const c = this._cfg;
+    if (c.show_health === false) return;
+
+    const design = parseFloat(c.batt_capacity_kwh) || 0;
+    let soh = null;
+    // Capacité réelle actuelle — lecture directe (ex. "Total Battery Capacity" Zendure)
+    let fullKwh = c.batt_full_kwh ? this._getNum(c.batt_full_kwh) : 0;
+
+    // SOH : entité directe prioritaire
+    if (c.batt_soh) { const v = this._getNum(c.batt_soh); if (v > 0) soh = v; }
+    // Sinon calcul capacité réelle / théorique
+    if (soh === null && fullKwh > 0 && design > 0) soh = (fullKwh / design) * 100;
+    // Déduire la capacité réelle si on a le SOH mais pas l'entité capacité
+    if (fullKwh <= 0 && soh !== null && design > 0) fullKwh = design * soh / 100;
+
+    const cls = soh === null ? '' : soh >= 90 ? 'good' : soh >= 80 ? 'mid' : 'low';
+
+    const sohEl = this._el('sfcSohVal');
+    const barEl = this._el('sfcSohBar');
+    if (sohEl) {
+      sohEl.textContent = soh !== null ? Math.round(soh) + ' %' : '— %';
+      sohEl.className = 'sfc-health-val' + (cls ? ' soh-' + cls : '');
+    }
+    if (barEl) {
+      barEl.style.width = soh !== null ? Math.min(100, soh).toFixed(0) + '%' : '0%';
+      barEl.className = 'sfc-health-bar' + (cls ? ' soh-' + cls + '-bg' : '');
+    }
+
+    const capEl = this._el('sfcCapVal');
+    if (capEl) {
+      if (fullKwh > 0 && design > 0) capEl.textContent = fullKwh.toFixed(1) + ' / ' + design.toFixed(1) + ' kWh';
+      else if (design > 0)          capEl.textContent = '— / ' + design.toFixed(1) + ' kWh';
+      else                          capEl.textContent = '— kWh';
+    }
+
+    const cycEl = this._el('sfcCyclesVal');
+    if (cycEl) {
+      let cyc = null;
+      // Capteur cycles direct (prioritaire)
+      if (c.batt_cycles) { const v = this._getNum(c.batt_cycles); if (v > 0) cyc = v; }
+      // Sinon estimation EFC = base + énergie déchargée cumulée / capacité
+      if (cyc === null && c.batt_cycles_energy && design > 0) {
+        const disch = this._getNum(c.batt_cycles_energy);
+        const base  = parseFloat(c.batt_cycles_base) || 0;
+        if (disch > 0) cyc = base + disch / design;
+      }
+      const cycMax = parseFloat(c.batt_cycles_max) || 0;
+      if (cyc !== null && cyc > 0) {
+        cycEl.textContent = cycMax > 0
+          ? '↻ ' + Math.round(cyc) + ' / ' + Math.round(cycMax)
+          : '↻ ' + Math.round(cyc);
+      } else {
+        cycEl.textContent = '';
+      }
+    }
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  BLOC ÉCONOMIES / ROI
+  // ────────────────────────────────────────────────────────
+  // Bloc Économies & ROI : montants jour/mois/an, CO₂, badges Tempo, amortissement (PV + batterie).
+  _updateSavingsBlock(pvTodayKwh) {
+    const c = this._cfg;
+    if (c.show_savings === false) return;
+
+    const exportKwh = c.grid_export_today ? Math.max(0, this._getNum(c.grid_export_today)) : 0;
+    const price     = this._getCurrentPrice();
+    const co2k      = parseFloat(c.co2_factor) || 0.4;
+    const today     = new Date().toDateString();
+
+    // Mode 'entity' : les montants viennent de capteurs € pré-calculés dans HA → on saute
+    // toute l'accumulation interne (le calcul ci-dessous ne sert qu'au mode 'calc').
+    const useEntities = c.savings_mode === 'entity';
+
+    if (!useEntities) {
+      // Persistance (localStorage) : conserve l'accumulation valorisée HC/HP/Tempo entre les
+      // rechargements de page. Sans ça, un reload ré-initialise tout au prix de l'instant et
+      // écrase la variation tarifaire de la journée.
+      const savKey = 'sfc_sav_' + (c.pv_today || 'default');
+
+      // Premier appel après (re)chargement → tenter de restaurer l'état du jour
+      if (this._savDay == null) {
+        try {
+          const st = JSON.parse(localStorage.getItem(savKey) || 'null');
+          if (st && st.day === today) {
+            this._savDay     = st.day;
+            this._savAccum   = st.accum;
+            this._savLastPv  = st.lastPv;
+            this._savLastExp = st.lastExp;
+          }
+        } catch (e) { /* localStorage indispo → accumulation en mémoire seule */ }
+      }
+
+      // Reset à minuit (jour changé)
+      if (this._savDay !== today) {
+        this._savDay = today; this._savAccum = null;
+        this._savLastPv = null; this._savLastExp = null;
+      }
+
+      // Accumulation delta — chaque kWh autoconsommé valorisé au prix de SON moment (HC/HP/Tempo)
+      if (this._savLastPv === null) {
+        // Seed une seule fois par jour : la production déjà faite avant le 1er chargement est
+        // estimée au prix courant (approximation inévitable sans historique par tranche horaire).
+        this._savAccum   = Math.max(0, pvTodayKwh - exportKwh) * price;
+        this._savLastPv  = pvTodayKwh;
+        this._savLastExp = exportKwh;
+      } else {
+        const pvDelta  = pvTodayKwh  - this._savLastPv;
+        const expDelta = Math.max(0, exportKwh - this._savLastExp);
+        const auto     = Math.max(0, pvDelta - expDelta);
+        if (auto > 0) this._savAccum += auto * price;
+        this._savLastPv  = pvTodayKwh;
+        this._savLastExp = exportKwh;
+      }
+
+      // Sauvegarder l'état → survit au rechargement, garde la valorisation HC/HP cumulée
+      try {
+        localStorage.setItem(savKey, JSON.stringify({
+          day: this._savDay, accum: this._savAccum,
+          lastPv: this._savLastPv, lastExp: this._savLastExp,
+        }));
+      } catch (e) { /* ignore */ }
+    }
+
+    const fmtEur = v => v < 0.005 ? '0.00 €' : v >= 100 ? Math.round(v) + ' €' : v.toFixed(2) + ' €';
+    const fmtCo2 = kg => {
+      if (kg < 0.05) return '< 0.1 kg CO₂';
+      return kg >= 1000 ? (kg/1000).toFixed(2) + ' t CO₂' : kg.toFixed(1) + ' kg CO₂';
+    };
+
+    // Prix affiché
+    const priceEl = this._el('sfcCurrentPrice');
+    if (priceEl) priceEl.textContent = price.toFixed(4).replace(/\.?0+$/,'') + ' €/kWh';
+
+    // Badge Tempo (nom de couleur localisé)
+    const colorMap = { blue:'blue',bleu:'blue',white:'white',blanc:'white',red:'red',rouge:'red' };
+    const tempoIcon = {
+      blue:  '🔵 ' + t(c,'tempo_blue'),
+      white: '⚪ ' + t(c,'tempo_white'),
+      red:   '🔴 ' + t(c,'tempo_red'),
+    };
+    const hcHp = (isHC) => isHC ? t(c,'lbl_hc') : t(c,'lbl_hp');
+    const tempoBadge = this._el('sfcTempoBadge');
+    if (tempoBadge && c.price_mode === 'tempo' && c.tempo_color) {
+      const raw = (this._getState(c.tempo_color) || '').toLowerCase();
+      const isHC = this._isHCPeriod();
+      const cls = colorMap[raw];
+      if (cls) {
+        tempoBadge.textContent = `${tempoIcon[cls]} · ${hcHp(isHC)}`;
+        tempoBadge.className   = `sfc-tempo-badge sfc-tempo-${cls}`;
+        tempoBadge.style.display = '';
+      }
+    }
+
+    // Badge Tempo — couleur de DEMAIN (si connue)
+    const tempoBadgeT = this._el('sfcTempoBadgeTomorrow');
+    if (tempoBadgeT && c.price_mode === 'tempo') {
+      let rawT = '';
+      if (c.tempo_color_tomorrow) {
+        rawT = (this._getState(c.tempo_color_tomorrow) || '').toLowerCase();
+      } else if (c.tempo_color) {
+        // Détection auto : attribut "demain" sur l'entité Tempo (selon l'intégration)
+        const at = this._hass.states[c.tempo_color]?.attributes || {};
+        rawT = String(at.tomorrow ?? at.next_color ?? at.tomorrow_color ?? at.couleur_demain ?? at.demain ?? at.color_tomorrow ?? '').toLowerCase();
+      }
+      const clsT = colorMap[rawT];
+      if (clsT) {
+        tempoBadgeT.textContent = `${t(c,'tempo_tomorrow_lbl')} : ${tempoIcon[clsT]}`;
+        tempoBadgeT.className   = `sfc-tempo-badge sfc-tempo-tomorrow sfc-tempo-${clsT}`;
+        tempoBadgeT.style.display = '';
+      } else {
+        tempoBadgeT.style.display = 'none';   // demain inconnu → masqué
+      }
+    }
+
+    // Revenu de revente (export rémunéré)
+    const exportPrice = parseFloat(c.export_price) || 0;
+    const revToday = c.export_paid ? exportKwh * exportPrice : 0;
+
+    // Aujourd'hui : économies (autoconso) + revenu (export)
+    const savDay = this._el('sfcSavDay');
+    const co2Day = this._el('sfcCo2Day');
+    if (savDay) savDay.textContent = fmtEur(useEntities ? this._getNum(c.savings_day_entity) : ((this._savAccum || 0) + revToday));
+    if (co2Day) co2Day.textContent = fmtCo2(Math.max(0, pvTodayKwh - exportKwh) * co2k);
+
+    // Mois : capteur € (mode entity) OU autoconso (× prix évité) + revente (mode calc)
+    const pvMonth = c.pv_month_kwh ? this._getNum(c.pv_month_kwh) : 0;
+    if (useEntities) {
+      const sm = this._el('sfcSavMonth'); if (sm) sm.textContent = fmtEur(this._getNum(c.savings_month_entity));
+      if (pvMonth > 0) { const cm = this._el('sfcCo2Month'); if (cm) cm.textContent = fmtCo2(pvMonth * co2k); }
+    } else if (pvMonth > 0) {
+      let monthTotal;
+      if (c.export_paid && c.grid_export_month) {
+        const expM = Math.max(0, this._getNum(c.grid_export_month));
+        monthTotal = Math.max(0, pvMonth - expM) * price + expM * exportPrice;
+      } else {
+        monthTotal = pvMonth * price;
+      }
+      const sm = this._el('sfcSavMonth'); if (sm) sm.textContent = fmtEur(monthTotal);
+      const cm = this._el('sfcCo2Month'); if (cm) cm.textContent = fmtCo2(pvMonth * co2k);
+    }
+
+    // Année — yearTotal sert aussi de rythme annuel pour le ROI
+    const pvYear = c.pv_year_kwh ? this._getNum(c.pv_year_kwh) : 0;
+    let yearTotal = 0;
+    if (useEntities) {
+      yearTotal = this._getNum(c.savings_year_entity);
+      const sy = this._el('sfcSavYear'); if (sy) sy.textContent = fmtEur(yearTotal);
+      if (pvYear > 0) { const cy = this._el('sfcCo2Year'); if (cy) cy.textContent = fmtCo2(pvYear * co2k); }
+    } else if (pvYear > 0) {
+      if (c.export_paid && c.grid_export_year) {
+        const expY = Math.max(0, this._getNum(c.grid_export_year));
+        yearTotal = Math.max(0, pvYear - expY) * price + expY * exportPrice;
+      } else {
+        yearTotal = pvYear * price;
+      }
+      const sy = this._el('sfcSavYear'); if (sy) sy.textContent = fmtEur(yearTotal);
+      const cy = this._el('sfcCo2Year'); if (cy) cy.textContent = fmtCo2(pvYear * co2k);
+    }
+
+    // ── Économies batterie dédiées (arbitrage) ──
+    // N'est compté QUE si une valorisation €/kWh est saisie (opt-in explicite) → évite de
+    // double-compter l'énergie solaire déjà valorisée côté PV (autoconsommation).
+    const battRate = parseFloat(c.batt_savings_price) || 0;
+    const battDisEntity = c.batt_savings_kwh || c.batt_cycles_energy;   // repli sur l'entité de l'état de santé
+    const battDisTotal  = (battRate > 0 && battDisEntity) ? Math.max(0, this._getNum(battDisEntity)) : 0;
+    const battCumulative = battDisTotal * battRate;
+    // Bénéfice batterie annuel estimé (rythme du ROI) : décharge du jour × 365 × valorisation
+    const battDisToday = c.batt_dis_today ? Math.max(0, this._getNum(c.batt_dis_today)) : 0;
+    const battAnnual   = battDisToday * 365 * battRate;
+    const savBatt = this._el('sfcSavBatt');
+    if (savBatt) savBatt.textContent = battCumulative > 0 ? fmtEur(battCumulative) : '— €';
+    const savBattSub = this._el('sfcSavBattSub');
+    if (savBattSub) savBattSub.textContent = battDisTotal > 0 ? Math.round(battDisTotal) + ' kWh' : '—';
+
+    // ── ROI global — économies cumulées (PV + batterie) vs coût total (PV + batterie) ──
+    const pvCost    = parseFloat(c.install_cost) || 0;
+    const battCost  = parseFloat(c.batt_cost) || 0;
+    const totalCost = pvCost + battCost;
+    if (totalCost > 0 && yearTotal > 0) {
+      const bar  = this._el('sfcRoiBar');
+      const val  = this._el('sfcRoiVal');
+      const datesEl = this._el('sfcRoiDates');
+      const en   = c.language === 'en';
+      const yrsLbl = en ? 'yrs' : 'ans';
+
+      // Rythme annuel : yearTotal est cumulé depuis le 1er janvier (year-to-date), PAS une année
+      // complète → on l'annualise pour le « temps restant » (ex. 319 € au 8 juin ≈ 730 €/an).
+      // ⚠️ Annualisation calendaire simple (production saisonnière → approximation). N'affecte que
+      // le rythme — pas la valeur « Cette année » affichée, ni le taux €/kWh (ratio YTD/YTD).
+      const nowD = new Date();
+      const yearFrac = Math.max(0.04, (nowD - new Date(nowD.getFullYear(), 0, 1)) / (365.25 * 86400000));
+      const annualPace = yearTotal / yearFrac + battAnnual;   // bénéfice annuel combiné (annualisé)
+
+      // Économies déjà cumulées (null = mode projection, aucun cumul connu)
+      let cumulative = null;
+      if (useEntities) {
+        cumulative = this._getNum(c.savings_total_entity);
+      } else {
+        const pvTotal = c.pv_total ? this._getNum(c.pv_total) : 0;
+        if (pvTotal > 0) {
+          const ratePerKwh = pvYear > 0 ? yearTotal / pvYear : price;   // €/kWh (insensible au prorata)
+          cumulative = pvTotal * ratePerKwh + battCumulative;
+        }
+      }
+
+      // Formatage date « mois année » (ex. mars 2027)
+      const fmtMY = d => d.toLocaleDateString(en ? 'en-GB' : 'fr-FR', { month: 'short', year: 'numeric' });
+      const Y = 365.25 * 86400000;
+      const sd = c.install_date ? new Date(c.install_date) : null;
+      let startTxt = (sd && !isNaN(sd)) ? fmtMY(sd) : '';
+      // Repli : pas de date saisie → estimer le départ depuis PV total ÷ production annuelle.
+      // Préfixe « ~ » car c'est une estimation (suppose une production annuelle ~constante).
+      if (!startTxt && pvYear > 0) {
+        const pvTotalKwh = c.pv_total ? this._getNum(c.pv_total) : 0;
+        const annualProd = pvYear / yearFrac;        // production annuelle estimée (kWh/an)
+        if (pvTotalKwh > 0 && annualProd > 0) {
+          const est = new Date(Date.now() - (pvTotalKwh / annualProd) * Y);
+          startTxt = '~' + fmtMY(est);
+        }
+      }
+
+      // Rythme annuel retenu pour le « temps restant » :
+      // si une date de mise en service est fournie ET qu'on a un cumul → rythme = cumul ÷ âge
+      // (cohérent avec le Total, insensible à un capteur « année » partiel/créé en cours d'année).
+      // Sinon → rythme = capteur année annualisé (annualPace).
+      let pace = annualPace;
+      if (cumulative !== null && cumulative > 0 && sd && !isNaN(sd)) {
+        const ageY = (Date.now() - sd.getTime()) / Y;
+        if (ageY > 0.25) pace = cumulative / ageY;
+      }
+      let datesLine = '';
+
+      if (cumulative === null) {
+        // Projection : amortissement complet depuis aujourd'hui (pas de cumul connu)
+        const roiYrs = totalCost / annualPace;
+        if (bar) bar.style.width = Math.min(100, annualPace / totalCost * 100).toFixed(1) + '%';
+        if (val) val.textContent = roiYrs.toFixed(1) + ' ' + yrsLbl;
+        const landing = new Date(Date.now() + roiYrs * Y);
+        datesLine = (startTxt ? '📅 ' + startTxt + ' → ' : '📅 → ') + fmtMY(landing);
+      } else if (cumulative >= totalCost) {
+        // Amorti : barre pleine, date de rentabilisation estimée + bénéfice net cumulé
+        const net = cumulative - totalCost;
+        if (bar) bar.style.width = '100%';
+        if (val) val.textContent = en ? 'Paid off ✓' : 'Amorti ✓';
+        const sincePayoff = pace > 0 ? net / pace : 0;
+        const payoff = new Date(Date.now() - sincePayoff * Y);
+        datesLine = (startTxt ? '📅 ' + startTxt + ' → ' : '📅 ')
+          + (en ? 'paid off ~' : 'amorti ~') + fmtMY(payoff)
+          + `  ·  <span class="sfc-roi-gain">+${fmtEur(net)}</span>`;
+      } else {
+        // En cours : avancement réel + date d'atterrissage estimée
+        const remYrs = (totalCost - cumulative) / pace;
+        if (bar) bar.style.width = Math.min(100, cumulative / totalCost * 100).toFixed(1) + '%';
+        if (val) val.textContent = remYrs.toFixed(1) + ' ' + yrsLbl;
+        const landing = new Date(Date.now() + remYrs * Y);
+        datesLine = (startTxt ? '📅 ' + startTxt + ' → ' : '📅 → ') + fmtMY(landing);
+      }
+
+      if (datesEl) { datesEl.innerHTML = datesLine; datesEl.style.display = ''; }
+    }
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  DÉCOR & CYCLE DE VIE (étoiles, timer soleil, connect/disconnect)
+  // ────────────────────────────────────────────────────────
+  // Crée le champ d'étoiles (45 points, une seule fois) affiché la nuit.
+  _createStars() {
+    if (this._starsCreated) return;
+    const container = this.shadowRoot.getElementById('sfcStars');
+    if (!container) return;
+    this._starsCreated = true;
+    for (let i = 0; i < 45; i++) {
+      const s = document.createElement('div');
+      s.className = 'sfc-star';
+      s.style.left = Math.random() * 100 + '%';
+      s.style.top  = Math.random() * 85 + '%';
+      s.style.animationDelay    = Math.random() * 3 + 's';
+      s.style.animationDuration = (1.5 + Math.random() * 2) + 's';
+      const sz = 1 + Math.random() * 2;
+      s.style.width = sz + 'px'; s.style.height = sz + 'px';
+      container.appendChild(s);
+    }
+  }
+
+  // (Re)démarre le rafraîchissement périodique du soleil/ciel (toutes les 30 s).
+  _startSunTimer() {
+    if (this._sunTimer) clearInterval(this._sunTimer);
+    this._sunTimer = setInterval(() => this._updateSun(), 30000);
+  }
+
+  // Nettoyage à la déconnexion : arrête timers et tweens GSAP (évite les fuites mémoire).
+  disconnectedCallback() {
+    if (this._sunTimer) { clearInterval(this._sunTimer); this._sunTimer = null; }
+    if (this._lightningTimer) { clearTimeout(this._lightningTimer); this._lightningTimer = null; }
+    if (this._battGlowTl)   { this._battGlowTl.kill(); this._battGlowTl = null; }
+    if (this._bubbleTls)    { this._bubbleTls.forEach(t => t.kill()); this._bubbleTls = null; }
+    if (this._svgBubbleTls) { this._svgBubbleTls.forEach(t => t.kill()); this._svgBubbleTls = null; }
+    if (this._battWaveTick && window.gsap) { gsap.ticker.remove(this._battWaveTick); this._battWaveTick = null; }
+    if (this._waveTweens) { this._waveTweens.forEach(t => t.kill()); this._waveTweens = null; }
+    this._disposeSceneRenderer();
+  }
+
+  // Reconnexion (édition dashboard, scroll virtualisé) : relance timer et tweens si nécessaire.
+  connectedCallback() {
+    // Restaurer les animations si la carte est reconnectée (édition dashboard, scroll virtualisé…)
+    if (!this._cfg || !Object.keys(this._cfg).length) return;
+    if (!this._sunTimer) this._startSunTimer();
+    if (!this._sceneRenderer) this._initSceneRenderer();
+    if (window.gsap && this._battSVGAnimReady && !this._battWaveTick) {
+      if (!this._waveTweens) this._initWaveTweens();   // recréer les tweens des points
+      this._battWaveTick = () => this._drawBattWaves();
+      gsap.ticker.add(this._battWaveTick);
+    }
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  HELPERS — lecture d'entités & formatage
+  // ────────────────────────────────────────────────────────
+  // Valeur numérique d'une entité ; liste séparée par des virgules → SOMME ; fallback sinon.
+  _getNum(entityId, fallback = 0) {
+    if (!entityId || !this._hass) return fallback;
+    // Plusieurs entités séparées par des virgules → SOMME (ex. 3 onduleurs, plusieurs batteries).
+    // Une virgule n'apparaît jamais dans un id d'entité ni un nombre → séparateur sûr.
+    if (typeof entityId === 'string' && entityId.includes(',')) {
+      let sum = 0, any = false;
+      for (const part of entityId.split(',')) {
+        const id = part.trim();
+        if (!id) continue;
+        const s = this._hass.states[id];
+        const v = parseFloat(s ? s.state : id);
+        if (!isNaN(v)) { sum += v; any = true; }
+      }
+      return any ? sum : fallback;
+    }
+    const s = this._hass.states[entityId];
+    if (s) {
+      const v = parseFloat(s.state);
+      return isNaN(v) ? fallback : v;
+    }
+    const raw = parseFloat(entityId);
+    return isNaN(raw) ? fallback : raw;
+  }
+
+  // État brut (chaîne) d'une entité, ou null.
+  _getState(entityId) {
+    if (!entityId || !this._hass) return null;
+    return this._hass.states[entityId]?.state || null;
+  }
+
+  // Libellé d'état localisé (ex. select Zendure → "Couplage intelligent").
+  // Utilise hass.formatEntityState si dispo, sinon formate l'option brute.
+  _getStateDisplay(entityId) {
+    if (!entityId || !this._hass) return null;
+    const s = this._hass.states[entityId];
+    if (!s) return null;
+    if (typeof this._hass.formatEntityState === 'function') {
+      try { return this._hass.formatEntityState(s); } catch (e) { /* repli ci-dessous */ }
+    }
+    return String(s.state).replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
+  }
+
+  // Formate une puissance W → « x W » / « x.xx kW » (ou « valeur unité » pour une autre unité).
+  _fmt(w, unit = 'W') {
+    if (unit === 'W') return w >= 1000 ? (w/1000).toFixed(2) + ' kW' : Math.round(w) + ' W';
+    return w.toFixed(2) + ' ' + unit;
+  }
+
+  // Formate une durée en heures → « Jj Hh » / « Hh Mmin » / « Mmin ».
+  _formatDuration(hours) {
+    if (!Number.isFinite(hours) || hours < 0) return '—';
+    const totalMinutes = Math.max(0, Math.round(hours * 60));
+    const days = Math.floor(totalMinutes / 1440);
+    const dayRemainder = totalMinutes % 1440;
+    const wholeHours = Math.floor(dayRemainder / 60);
+    const minutes = dayRemainder % 60;
+    if (days > 0) return days + t(this._cfg, 'unit_day') + ' ' + wholeHours + 'h';
+    if (wholeHours > 0) return wholeHours + 'h ' + minutes + 'min';
+    return minutes + 'min';
+  }
+
+  // Raccourci getElementById dans le shadow DOM.
+  _el(id) { return this.shadowRoot.getElementById(id); }
+
+  // Active/désactive (classe .inactive) un ensemble de tubes de flux.
+  _setFlowActive(ids, active) {
+    ids.forEach(id => this._el(id)?.classList.toggle('inactive', !active));
+  }
+
+  // Définit l'attribut `d` (tracé SVG) d'un ensemble de tubes de flux.
+  _setFlowPath(ids, path) {
+    ids.forEach(id => this._el(id)?.setAttribute('d', path));
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  BOUCLE PRINCIPALE — _update()
+  // ────────────────────────────────────────────────────────
+  // Boucle principale : lit toutes les entités et met à jour scène, badges, barres, nœuds et blocs.
+  _update() {
+    if (!this._hass) return;
+    const c = this._cfg;
+    const pvW      = this._getNum(c.pv_power);
+    const gridW    = this._getNum(c.grid_power);
+    const homeW    = this._getNum(c.home_power);
+    const battSoc  = this._getNum(c.batt_soc, 0);
+    const battV    = this._getNum(c.batt_voltage);
+    const bmsT     = this._getNum(c.batt_temp);
+    let battPower = c.batt_power ? this._getNum(c.batt_power) : null;
+    // Convention attendue : + = charge, − = décharge. Inverser si l'entité fait l'inverse.
+    if (battPower !== null && c.batt_power_invert) battPower = -battPower;
+    // Source de vérité unique pour le sens charge/décharge : on privilégie le signe de
+    // batt_power (déjà corrigé par batt_power_invert), fiable même en charge depuis le réseau.
+    // Repli sur l'heuristique PV/maison uniquement si l'entité est absente ou négligeable.
+    const battDirKnown = battPower !== null && Math.abs(battPower) > 10;
+    const battIsChg = battDirKnown ? battPower >  50 : (battSoc < 99 && pvW > 100);
+    const battIsDis = battDirKnown ? battPower < -50 : (homeW > pvW + 100);
+    const minCell  = this._getNum(c.min_cell);
+    const maxCell  = this._getNum(c.max_cell);
+    const battDis  = this._getNum(c.batt_dis_today);
+    const battChg  = this._getNum(c.batt_chg_today);
+    const totalPv  = this._getNum(c.pv_total);
+    const todayPv  = this._getNum(c.pv_today);
+    const rem      = this._getNum(c.remaining);
+    const pwrPct   = this._getNum(c.pwr_percent, 0);
+    const todayLoad= this._getNum(c.today_load);
+    const modeRaw  = this._getState(c.batt_mode);
+    const weatherSt= this._getState(c.weather);
+    const extT     = this._getNum(c.ext_temp);
+
+    // Status badge
+    const sb = this._el('sfcStatus');
+    if (sb) {
+      // Priorité à batt_power (respecte batt_power_invert) ; repli sur l'heuristique
+      // home/pv uniquement si batt_power n'est pas configuré ou proche de zéro.
+      let st = 'idle', txt = t(c,'status_idle');
+      if (pvW > 50)   { txt = t(c,'status_producing'); st = 'producing'; }
+      if (battIsChg)  { txt = t(c,'status_charging');  st = 'charging';  }
+      if (battIsDis)  { txt = t(c,'status_discharge'); st = 'discharging'; }
+      sb.textContent = txt; sb.className = 'sfc-badge ' + st;
+    }
+
+    // Météo
+    const wi = getWeather(weatherSt || '');
+    const wIcon = this._el('sfcWIcon'); if (wIcon) wIcon.textContent = wi.icon;
+    const wTemp = this._el('sfcWTemp'); if (wTemp) wTemp.textContent = extT ? extT + '°C' : '—°C';
+
+    // PV badge
+    const pvb = this._el('sfcPvBig'); if (pvb) pvb.textContent = this._fmt(pvW);
+    const sunActive = pvW > 50;
+    this._setFlowActive([
+      'sfcSunFlowLine','sfcSunFlowTailLong','sfcSunFlowTailMid','sfcSunFlowGlow',
+      'sfcSunFlowLine_s','sfcSunFlowTailLong_s','sfcSunFlowTailMid_s','sfcSunFlowGlow_s',
+    ], sunActive);
+    // Mode séparé : aligner le flux solaire vertical sur le nœud Maison (décalé par les routeurs)
+    this._alignSunFlowToHome();
+
+    // Flow nodes
+    const gEl = this._el('sfcGrid');   if (gEl) gEl.textContent = this._fmt(Math.abs(gridW));
+    const hEl = this._el('sfcHome');   if (hEl) hEl.textContent = this._fmt(homeW);
+    const bEl = this._el('sfcBatt');   if (bEl) bEl.textContent = Math.round(battSoc) + '%';
+    const bvEl= this._el('sfcBattV'); if (bvEl) bvEl.textContent = battV ? battV.toFixed(1) + ' V' : '';
+
+    const gdEl= this._el('sfcGridDir');
+    if (gdEl) gdEl.textContent = gridW > 50 ? t(c,'dir_import') : gridW < -50 ? t(c,'dir_export') : '—';
+
+    // Batterie — état
+    const battWrapper = this._el('sfcBattWrapper');
+    const battSocTxt  = this._el('sfcBattSocText');
+    if (battSocTxt) battSocTxt.textContent = Math.round(battSoc) + '%';
+    const battState = battSoc < 15 ? 'low'
+                    : battIsChg    ? 'charging'
+                    : battIsDis    ? 'discharging'
+                    :                'idle';
+    if (battWrapper) {
+      battWrapper.classList.remove('charging','discharging','low');
+      if (battState !== 'idle') battWrapper.classList.add(battState);
+    }
+    // Animation GSAP (physique liquide + bulles + glow)
+    if (this._battAnimReady) {
+      this._updateBatteryGSAP(battSoc, battState);
+    } else {
+      // Fallback CSS si GSAP pas encore chargé
+      const bl = this._el('sfcBattLiquid'), bw = this._el('sfcBattWave');
+      if (bl) bl.style.height = Math.round(battSoc) + '%';
+      if (bw) bw.style.height = Math.round(battSoc) + '%';
+    }
+    
+    //batterie power
+    const bpEl = this._el('sfcBattFlowPower');
+    if (bpEl) {
+        if (battPower === null || battPower === undefined || !c.batt_power) {
+            bpEl.style.display = 'none';
+        } else {
+            const absPower = Math.abs(battPower);
+            const sign = battPower > 50 ? '+' : battPower < -50 ? '-' : '';
+            bpEl.textContent = absPower >= 1000
+            ? sign + (absPower/1000).toFixed(2) + ' kW'
+            : sign + Math.round(absPower) + ' W';
+            bpEl.classList.toggle('discharge', battPower < -50);
+            bpEl.style.display = absPower > 10 ? '' : 'none';
+        }
+    }
+
+    // Glows
+    const battNode = this._el('sfcNodeBatt');
+    if (battNode) {
+      battNode.classList.remove('charging','discharging');
+      if (battIsChg)      battNode.classList.add('charging');
+      else if (battIsDis) battNode.classList.add('discharging');
+    }
+    const gridNode = this._el('sfcNodeGrid');
+    if (gridNode) gridNode.style.filter = gridW > 50 ? 'drop-shadow(0 0 10px rgba(79,195,247,0.5))' : '';
+
+    // Flux lines + arrows
+    // Les IDs _s correspondent au SVG single-mode (sfcSingleFlowSvg, viewBox 0 0 100 100)
+    // _setFlowActive/_setFlowPath ignorent silencieusement les IDs absents du DOM
+    const lg = this._el('sfcLG');
+    if (lg) {
+      const gridActive   = Math.abs(gridW) >= 50;
+      const gridFlowIds  = ['sfcLG','sfcLGTailLong','sfcLGTailMid','sfcLGGlow'];
+      const gridFlowIds_s= ['sfcLG_s','sfcLGTailLong_s','sfcLGTailMid_s','sfcLGGlow_s'];
+      this._setFlowActive([...gridFlowIds, ...gridFlowIds_s], gridActive);
+      if (gridActive) {
+        // Chemin mode separate/emoji (viewBox 420×100)
+        const path   = gridW < -50 ? 'M 195,40 L 65,40'    : 'M 65,40 L 195,40';
+        // Chemin mode single (viewBox 1536×1024) — tracé Figma
+        const path_s = scenePath(sceneLayout(c).flow_grid, gridW < -50);
+        this._setFlowPath(gridFlowIds,   path);
+        this._setFlowPath(gridFlowIds_s, path_s);
+      }
+    }
+
+    const lb = this._el('sfcLB');
+    const isDischarging = battIsDis;
+    if (lb) {
+      const battFlowIds  = ['sfcLB','sfcLBTailLong','sfcLBTailMid','sfcLBGlow'];
+      const battFlowIds_s= ['sfcLB_s','sfcLBTailLong_s','sfcLBTailMid_s','sfcLBGlow_s'];
+      const battPowerAbs = battPower !== null ? Math.abs(battPower) : null;
+      const battActive = (battPowerAbs !== null ? battPowerAbs > 10 : (battDis >= 0.01 || battChg >= 0.01 || pvW >= 50 || isDischarging));
+      this._setFlowActive([...battFlowIds, ...battFlowIds_s], battActive);
+      if (isDischarging) {
+        this._setFlowPath(battFlowIds,   'M 355,40 L 225,40');
+        this._setFlowPath(battFlowIds_s, scenePath(sceneLayout(c).flow_battery, true));
+        lb.setAttribute('marker-end', 'url(#arrowDis)');
+      } else {
+        this._setFlowPath(battFlowIds,   'M 225,40 L 355,40');
+        this._setFlowPath(battFlowIds_s, scenePath(sceneLayout(c).flow_battery, false));
+        lb.setAttribute('marker-end', 'url(#arrowBatt)');
+      }
+    }
+
+    // Progress bars
+    const pvPct = Math.min(100, Math.round(pvW / (c.pv_max_watts || 2500) * 100));
+    // Barre PWR : valeur directe (entité %) OU calculée = import réseau ÷ puissance souscrite (kVA)
+    let pwrBar;
+    if (c.pwr_mode === 'calc') {
+      const kva = parseFloat(c.pwr_kva) || 0;
+      pwrBar = kva > 0 ? Math.max(0, gridW) / (kva * 1000) * 100 : 0;  // export (gridW<0) → 0%
+    } else {
+      pwrBar = pwrPct;
+    }
+    // Barre BAT : SOC (défaut) OU puissance ÷ limite (charge/décharge)
+    let battBar = battSoc;
+    if (c.batt_bar_mode === 'power' && battPower !== null) {
+      if (battPower >= 0) {            // charge
+        const lim = c.batt_charge_limit ? this._getNum(c.batt_charge_limit) : 0;
+        battBar = lim > 0 ? battPower / lim * 100 : 0;
+      } else {                          // décharge
+        const lim = c.batt_discharge_limit ? this._getNum(c.batt_discharge_limit)
+                  : c.batt_charge_limit    ? this._getNum(c.batt_charge_limit) : 0;
+        battBar = lim > 0 ? Math.abs(battPower) / lim * 100 : 0;
+      }
+    }
+    this._setPct('sfcPvBar',   'sfcPvBarPct',  pvPct);
+    this._setPct('sfcPwrBar',  'sfcPwrBarPct', Math.min(100, Math.max(0, pwrBar)));
+    this._setPct('sfcBattBar', 'sfcBattBarPct', Math.min(100, Math.max(0, battBar)));
+
+    // Mode
+    const modeEl = this._el('sfcMode');
+    if (modeEl) {
+      const rawLc = modeRaw != null ? String(modeRaw).toLowerCase() : '';
+      // Cas 1 : batt_mode est un select de STRATÉGIE (ex. Zendure : couplage intelligent /
+      // charge forcée / décharge forcée). On affiche le libellé localisé du select, car le
+      // badge en haut (statut) donne déjà charge/décharge en temps réel.
+      const isStrategy = c.batt_mode && modeRaw != null
+        && !['0', '1', 'charge', 'discharge', 'on', 'off'].includes(rawLc);
+      if (isStrategy) {
+        modeEl.textContent = this._getStateDisplay(c.batt_mode) || modeRaw;
+        // Couleur d'après le mot-clé (vérifier décharge AVANT charge → "décharge" contient "charge")
+        const mc = /discharg|décharg|decharg/.test(rawLc) ? 'discharge'
+                 : /charg/.test(rawLc) ? 'charge' : 'idle';
+        modeEl.className = 'sfc-mode ' + mc;
+      } else {
+        // Cas 2 : capteur 0/1 ou rien → charge/décharge déduits de la puissance réelle
+        // (battPower > 0 = charge, < 0 = décharge) ou, à défaut, du bilan PV/maison.
+        const isChg = rawLc === '0' || rawLc === 'charge'    || battIsChg;
+        const isDis = rawLc === '1' || rawLc === 'discharge' || battIsDis;
+        const mc = isDis ? 'discharge' : isChg ? 'charge' : 'idle';
+        modeEl.textContent = isDis ? t(c,'mode_discharge') : isChg ? t(c,'mode_charge') : t(c,'mode_idle');
+        modeEl.className = 'sfc-mode ' + mc;
+      }
+    }
+
+    const bmsEl = this._el('sfcBmsT');    if (bmsEl) bmsEl.textContent = bmsT ? bmsT.toFixed(1) + '°C' : '—°C';
+    const co2El = this._el('sfcMcCo2');
+    if (co2El) {
+      const co2k = (parseFloat(c.co2_factor) || 0.4) * (todayPv || 0);
+      co2El.textContent = co2k > 0
+        ? (co2k >= 1000 ? (co2k/1000).toFixed(2) + ' t' : co2k.toFixed(1) + ' kg')
+        : '— kg';
+    }
+    const mn    = this._el('sfcMinCell'); if (mn)    mn.textContent    = minCell ? minCell.toFixed(3) + ' V' : '—V';
+    const mx    = this._el('sfcMaxCell'); if (mx)    mx.textContent    = maxCell ? maxCell.toFixed(3) + ' V' : '—V';
+    const dl    = this._el('sfcCellDelta');
+    if (dl) { const d = minCell && maxCell ? Math.round((maxCell-minCell)*1000) : null; dl.textContent = d !== null ? 'Δ '+d+' mV' : ''; }
+    const bd = this._el('sfcBattDis'); if (bd) bd.textContent = battDis ? battDis.toFixed(2)+' kWh' : '— kWh';
+
+    // Endurance — entité temps restant directe (prioritaire) sinon calcul théorique
+    const ev = this._el('sfcEndVal'); const es = this._el('sfcEndSub');
+    if (ev) {
+      let hours = null;
+      if (c.endurance_entity) {
+        const raw = this._getNum(c.endurance_entity, NaN);
+        if (!isNaN(raw) && raw > 0) hours = c.endurance_unit === 'min' ? raw / 60 : raw;
+      }
+      if (hours === null && homeW > 50 && battSoc > 0) {
+        const remKwh = (battSoc/100) * (c.batt_capacity_kwh || 2.4);
+        hours = remKwh / (homeW/1000);
+      }
+      if (hours !== null && hours > 0) {
+        const endD = new Date(Date.now() + hours*3600000);
+        ev.textContent = this._formatDuration(hours);
+        if (es) es.textContent = '→ '+endD.toLocaleString(c.language==='en'?'en-GB':'fr-FR',{weekday:'short',hour:'2-digit',minute:'2-digit'});
+      } else { ev.textContent='—'; if (es) es.textContent=''; }
+    }
+
+    // Routeurs
+    this._updateRouters();
+
+    // Véhicule électrique
+    this._updateEV();
+
+    // Prévision de production
+    if (c.pv_forecast_today) {
+      const fToday = this._getNum(c.pv_forecast_today);
+      const elToday = this._el('sfcForecastToday');
+      if (elToday) elToday.textContent = '📊 ' + (fToday > 0 ? fToday.toFixed(1) + ' kWh' : '— kWh');
+      if (c.pv_forecast_tomorrow) {
+        const fTom = this._getNum(c.pv_forecast_tomorrow);
+        const elTom = this._el('sfcForecastTomorrow');
+        if (elTom) elTom.textContent = '↪ ' + (fTom > 0 ? fTom.toFixed(1) + ' kWh' : '— kWh');
+      }
+    }
+
+    // Inverter
+    const tp  = this._el('sfcTodayPv');    if (tp)  tp.textContent  = todayPv  ? todayPv.toFixed(2)+' kWh'  : '— kWh';
+    const cd  = this._el('sfcChgDis');     if (cd)  cd.textContent  = battChg  ? battChg.toFixed(2)+' kWh'  : '— kWh';
+    const re  = this._el('sfcRemaining');  if (re)  re.textContent  = rem      ? rem.toFixed(2)+' kWh'      : '— kWh';
+    const tl  = this._el('sfcTodayLoad'); if (tl)  tl.textContent  = todayLoad? todayLoad.toFixed(2)+' kWh': '— kWh';
+    // Bloc PV : PV total ; Bloc Conso : injection du jour
+    const ptot = this._el('sfcPvTotal');
+    if (ptot) ptot.textContent = totalPv ? (totalPv >= 1000 ? (totalPv/1000).toFixed(2)+' MWh' : totalPv.toFixed(0)+' kWh') : '— kWh';
+    const inj = this._el('sfcInjectionToday');
+    if (inj) { const v = c.grid_export_today ? this._getNum(c.grid_export_today) : null; inj.textContent = (v !== null) ? v.toFixed(2)+' kWh' : '— kWh'; }
+    // Bloc Conso : maison & réseau instantanés + import du jour
+    const cHome = this._el('sfcConsoHome');  if (cHome) cHome.textContent = this._fmt(homeW);
+    const cGrid = this._el('sfcConsoGrid');  if (cGrid) cGrid.textContent = this._fmt(Math.abs(gridW));
+    const cGridD = this._el('sfcConsoGridDir'); if (cGridD) cGridD.textContent = gridW > 50 ? t(c,'dir_import') : gridW < -50 ? t(c,'dir_export') : '—';
+    const imp = this._el('sfcImportToday');
+    if (imp) { const v = c.grid_import_today ? this._getNum(c.grid_import_today) : null; imp.textContent = (v !== null) ? v.toFixed(2)+' kWh' : '— kWh'; }
+    // Sous-lignes mois/année (Conso, Import, Injection)
+    const fmtK = v => v >= 1000 ? (v/1000).toFixed(2)+' MWh' : v.toFixed(1)+' kWh';
+    const subOf = (mKey, yKey) => {
+      const p = [];
+      if (c[mKey]) p.push(t(c,'rt_month') + ' ' + fmtK(this._getNum(c[mKey])));
+      if (c[yKey]) p.push(t(c,'rt_year')  + ' ' + fmtK(this._getNum(c[yKey])));
+      return p.join('<br>');
+    };
+    const csub = this._el('sfcConsoSub');     if (csub) csub.innerHTML = subOf('home_month_kwh','home_year_kwh');
+    const isub = this._el('sfcImportSub');     if (isub) isub.innerHTML = subOf('grid_import_month','grid_import_year');
+    const jsub = this._el('sfcInjectionSub');  if (jsub) jsub.innerHTML = subOf('grid_export_month','grid_export_year');
+    // Bilan net réseau du jour (import − injection)
+    const netEl = this._el('sfcNetGrid');
+    if (netEl) {
+      const net = this._getNum(c.grid_import_today) - this._getNum(c.grid_export_today);
+      netEl.textContent = (net >= 0 ? '+' : '−') + Math.abs(net).toFixed(1) + ' kWh';
+      netEl.style.color = net >= 0 ? 'var(--sfc-home,#FF6B6B)' : 'var(--sfc-batt,#69FF47)';
+    }
+    // Coût de l'électricité soutirée aujourd'hui (import × prix courant)
+    const costEl = this._el('sfcCostToday');
+    if (costEl) { const v = c.grid_import_today ? this._getNum(c.grid_import_today) * this._getCurrentPrice() : 0; costEl.textContent = v.toFixed(2) + ' €'; }
+
+    // ── Labels et batterie SVG mode single (sfcSingleFlowSvg, coords 1536×1024) ──
+    // Ces éléments n'existent qu'en mode single → les guards évitent les erreurs en mode séparé
+
+    // Sous-lignes secondaires de la scène (énergie du jour) — mode single, si activé
+    const secSc = c.show_scene_secondary === true;
+
+    // Chip réseau — sous-ligne : direction (défaut) OU import/export du jour (secondaire)
+    const sgGridVal = this._el('sfcSGGridVal');
+    if (sgGridVal) sgGridVal.textContent = this._fmt(Math.abs(gridW));
+    const sgGridSub = this._el('sfcSGGridSub');
+    if (sgGridSub) {
+      if (secSc && (c.grid_import_today || c.grid_export_today)) {
+        const im = c.grid_import_today ? this._getNum(c.grid_import_today) : 0;
+        const ex = c.grid_export_today ? this._getNum(c.grid_export_today) : 0;
+        sgGridSub.textContent = `↓${im.toFixed(1)} ↑${ex.toFixed(1)} kWh`;
+      } else {
+        sgGridSub.textContent = gridW > 50 ? t(c,'dir_import') : gridW < -50 ? t(c,'dir_export') : '—';
+      }
+    }
+
+    // Chip maison — sous-ligne (secondaire) : conso du jour
+    const sgHomeVal = this._el('sfcSGHomeVal');
+    if (sgHomeVal) sgHomeVal.textContent = this._fmt(homeW);
+    const sgHomeSub = this._el('sfcSGHomeSub');
+    if (sgHomeSub) sgHomeSub.textContent = (c.today_load ? todayLoad.toFixed(2) : '—') + ' kWh';
+
+    // Chip batterie
+    const sgBattVal = this._el('sfcSGBattVal');
+    if (sgBattVal) {
+      if (battPower !== null) {
+        const sign = battPower > 50 ? '+' : battPower < -50 ? '-' : '';
+        sgBattVal.textContent = sign + this._fmt(Math.abs(battPower));
+      } else {
+        sgBattVal.textContent = Math.round(battSoc) + '%';
+      }
+    }
+    // Chip batterie — sous-ligne : tension (défaut) OU charge/décharge du jour (secondaire)
+    const sgBattSub = this._el('sfcSGBattSub');
+    if (sgBattSub) {
+      if (secSc && (c.batt_chg_today || c.batt_dis_today)) {
+        sgBattSub.textContent = `↑${(battChg||0).toFixed(1)} ↓${(battDis||0).toFixed(1)} kWh`;
+      } else {
+        sgBattSub.textContent = battV ? battV.toFixed(1) + ' V' : '—';
+      }
+    }
+
+    // ── Batterie liquide SVG (mode single) ──
+    const svSoc = this._el('sfcSVBattSoc');
+    if (svSoc) svSoc.textContent = Math.round(battSoc) + '%';
+    if (this._battSVGAnimReady) {
+      this._updateBatterySVGGSAP(battSoc, battState);
+    } else {
+      // Fallback CSS si GSAP pas encore chargé
+      const svFill  = this._el('sfcSVBattFill');
+      const svWave1 = this._el('sfcSVBattWave1');
+      const svWave2 = this._el('sfcSVBattWave2');
+      if (svFill) {
+        const maxH  = 110;
+        const fillH = Math.round(maxH * battSoc / 100);
+        const fillY = this._gaugeOrigin()[1] + 2 + (maxH - fillH);
+        svFill.setAttribute('y', String(fillY + 5));
+        svFill.setAttribute('height', String(Math.max(0, fillH - 5)));
+        const levelRGB = this._battLevelRGB(battSoc);
+        const gTop = this._el('sfcSVGradLevelTop');
+        const gBot = this._el('sfcSVGradLevelBot');
+        if (gTop) gTop.setAttribute('stop-color', `rgba(${levelRGB},0.92)`);
+        if (gBot) gBot.setAttribute('stop-color', `rgb(${this._darken(levelRGB, 0.4)})`);
+        svFill.setAttribute('fill', 'url(#sfcSVGradLevel)');
+        svFill.setAttribute('class', battState === 'low' ? 'sv-low' : battState === 'charging' ? 'sv-charging' : '');
+      }
+    }
+    // Couleur des vagues = couleur du niveau de charge (%)
+    this._battWaveColor = this._battLevelRGB(battSoc);
+
+    // Autoconsommation / autoproduction
+    this._updateAutoConso();
+
+    // Bilan & performance (note de l'installation)
+    this._updateBalance();
+
+    // État de santé batterie
+    this._updateHealth();
+
+    // Économies
+    this._updateSavingsBlock(todayPv || 0);
+
+    // Sun + effets météo
+    this._updateSun();
+    this._updateWeatherFx(wi);
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  RENDU & ROUTEURS (barres, alignement flux, énergie routeurs)
+  // ────────────────────────────────────────────────────────
+  // Met à jour une barre de progression (largeur %) et son libellé.
+  _setPct(barId, pctId, pct) {
+    const bar = this._el(barId); const lbl = this._el(pctId);
+    if (bar) bar.style.width = Math.round(pct) + '%';
+    if (lbl) lbl.textContent = Math.round(pct) + '%';
+  }
+
+  // Aligne le flux solaire (ligne verticale) sur le nœud Maison en mode séparé : la maison
+  // n'est pas centrée quand des routeurs sont présents. (preserveAspectRatio="none" sur le SVG.)
+  _alignSunFlowToHome() {
+    const c = this._cfg;
+    if (c.img_scene_mode === 'single' || c.show_images === false) return;
+    const home  = this._el('sfcNodeHome');
+    const scene = this._el('sfcUnifiedScene');
+    if (!home || !scene) return;
+    const hr = home.getBoundingClientRect();
+    const sr = scene.getBoundingClientRect();
+    if (!sr.width || !hr.width) return;
+    const x = Math.round(((hr.left + hr.width / 2 - sr.left) / sr.width) * 520);
+    ['sfcSunFlowLine','sfcSunFlowTailLong','sfcSunFlowTailMid','sfcSunFlowGlow'].forEach(id => {
+      const el = this._el(id);
+      if (el) el.setAttribute('d', `M ${x},140 L ${x},320`);
+    });
+  }
+
+  // Calcule l'énergie du jour (kWh) d'un routeur en intégrant sa puissance dans le temps
+  // (somme de Riemann trapézoïdale), persistée en localStorage. Utilisé quand aucune entité
+  // énergie jour n'est fournie (ex. routeur F1ATB en mode calcul direct).
+  // ⚠️ Estimation côté navigateur : ne compte que pendant que la carte est ouverte.
+  _accumRouterEnergy(n, w) {
+    if (!this._rtEnergy) this._rtEnergy = {};
+    const c = this._cfg;
+    const key = 'sfc_rten_' + (c['router' + n + '_power'] || c['router' + n + '_opening'] || ('r' + n));
+    const today = new Date().toDateString();
+    const now = Date.now();
+    let st = this._rtEnergy[n];
+    if (!st) {
+      st = { day: today, kwh: 0, lastT: 0, lastW: w };
+      try {
+        const raw = JSON.parse(localStorage.getItem(key) || 'null');
+        if (raw && raw.day === today) st.kwh = parseFloat(raw.kwh) || 0;
+      } catch (e) { /* localStorage indispo */ }
+      this._rtEnergy[n] = st;
+    }
+    if (st.day !== today) { st.day = today; st.kwh = 0; st.lastT = 0; }
+    if (st.lastT) {
+      const dtH = (now - st.lastT) / 3600000;
+      // n'intègre que les petits intervalles (< 3 min) → ignore les coupures (carte fermée)
+      if (dtH > 0 && dtH < 0.05) st.kwh += ((st.lastW + w) / 2 / 1000) * dtH;
+    }
+    st.lastT = now; st.lastW = w;
+    try { localStorage.setItem(key, JSON.stringify({ day: st.day, kwh: st.kwh })); } catch (e) { /* ignore */ }
+  }
+
+  // Met à jour les routeurs : puissance (mode calc/power), flux, nœuds scène, mode somme, et
+  // sous-lignes énergie jour/mois/année/total de la section Routeurs.
+  _updateRouters() {
+    const c = this._cfg;
+    const activeRouters = [
+      c.router1_enabled ? 1 : 0,
+      c.router2_enabled ? 2 : 0,
+      c.router3_enabled ? 3 : 0,
+      c.router4_enabled ? 4 : 0,
+    ].filter(Boolean);
+    const nRouters = activeRouters.length;
+    const gap = nRouters > 0 ? (355 - 210) / (nRouters + 1) : 0;
+    const routerXs = activeRouters.map((_, i) => Math.round(210 + gap * (i+1)));
+    const sumMode = c.router_scene_mode === 'sum' && c.img_scene_mode !== 'single';
+    let routersTotalW = 0;
+
+    activeRouters.forEach((rn, i) => {
+      const c2 = this._cfg;
+      const rx = routerXs[i];
+
+      // ── Calcul de puissance selon le mode configuré ──
+      // Mode 'calc' : pour les routeurs F1ATB qui exposent une ouverture en %
+      //   puissance = résistance_nominale_W × (ouverture_% / 100)
+      // Mode 'power' (défaut) : lecture directe de l'entité puissance en W
+      let w;
+      if (c2['router' + rn + '_mode'] === 'calc') {
+        const resistW  = parseFloat(c2['router' + rn + '_resistance_w']) || 0;
+        const openPct  = this._getNum(c2['router' + rn + '_opening']);
+        w = Math.round(resistW * (openPct / 100));
+      } else {
+        w = this._getNum(c2['router' + rn + '_power']);
+      }
+      routersTotalW += w;
+      // Pas d'entité énergie jour → la carte calcule les kWh du jour en intégrant la puissance
+      if (!c2['router' + rn + '_energy']) this._accumRouterEnergy(rn, w);
+
+      const active = w > 10;
+      const path = `M 210,40 Q ${(210+rx)/2},20 ${rx},40`;
+      const rColor = c2['router' + rn + '_color'] || '#FFA040';   // couleur configurable du routeur
+
+      const line = this._el('sfcLR' + rn);
+      if (line) {
+        line.style.display = '';
+        line.setAttribute('d', path);
+        line.style.stroke = rColor;
+        line.classList.toggle('active', active);
+        line.classList.toggle('inactive', !active);
+      }
+
+      const valEl = this._el('sfcRouter' + rn + 'Val');
+      if (valEl) { valEl.textContent = w >= 1000 ? (w/1000).toFixed(2)+' kW' : Math.round(w)+' W'; valEl.className = 'sfc-router-val'+(active?'':' inactive'); valEl.style.color = active ? rColor : ''; }
+      const node = this._el('sfcRouterNode' + rn);
+      if (node)  node.classList.toggle('active', active);
+
+      // Section Routeurs : puissance (headline) — pour TOUS les routeurs, y compris 3/4 absents de la scène
+      const secPwrEl = this._el('sfcRPwr' + rn);
+      if (secPwrEl) {
+        secPwrEl.textContent = w >= 1000 ? (w/1000).toFixed(2)+' kW' : Math.round(w)+' W';
+        secPwrEl.style.color = rColor;                 // toujours la couleur du routeur
+        secPwrEl.style.opacity = active ? '1' : '0.45'; // juste atténuée quand inactif (pas gris terne)
+      }
+
+      // Flux single-mode par routeur
+      if (c.img_scene_mode === 'single') {
+        const fmt = v => v >= 1000 ? (v/1000).toFixed(2)+' kW' : Math.round(v)+' W';
+        if (rn === 1) {
+          this._setFlowActive(['sfcLSpa_s','sfcLSpaTailLong_s','sfcLSpaTailMid_s','sfcLSpaGlow_s'], active);
+          const el = this._el('sfcSGSpaVal'); if (el) el.textContent = fmt(w);
+          const tempEl = this._el('sfcSGSpaTemp');
+          if (tempEl && c.router1_temp) {
+            const temp = this._getNum(c.router1_temp);
+            tempEl.textContent = temp ? '🌡 ' + temp.toFixed(1) + ' °C' : '🌡 — °C';
+          }
+          // Sous-ligne secondaire : énergie du jour (capteur si fourni, sinon estimation ~ de la carte)
+          const enEl = this._el('sfcSGSpaEnergy');
+          if (enEl) {
+            if (c.router1_energy) {
+              const k = this._getNum(c.router1_energy);
+              enEl.textContent = '∑ ' + (k < 10 ? k.toFixed(2) : k.toFixed(1)) + ' kWh';
+            } else if (this._rtEnergy && this._rtEnergy[1]) {
+              enEl.textContent = '∑ ~' + this._rtEnergy[1].kwh.toFixed(2) + ' kWh';
+            } else {
+              enEl.textContent = '∑ — kWh';
+            }
+          }
+        }
+        if (rn === 2) {
+          this._setFlowActive(['sfcLECS_s','sfcLECSTailLong_s','sfcLECSTailMid_s','sfcLECSGlow_s'], active);
+          const el = this._el('sfcSGECSVal'); if (el) el.textContent = fmt(w);
+        }
+        // [PATCH maison] rn === 3 : badge libre (pas de path de flux dédié en single)
+        if (rn === 3) {
+          const el3 = this._el('sfcSGR3Val'); if (el3) el3.textContent = fmt(w);
+          const t3 = this._el('sfcSGR3Temp');
+          if (t3 && c.router3_temp) {
+            const temp3 = this._getNum(c.router3_temp);
+            t3.textContent = temp3 ? '🌡 ' + temp3.toFixed(1) + ' °C' : '🌡 — °C';
+          }
+        }
+      }
+    });
+
+    // ── Mode 'sum' (scène séparée) : un seul nœud additionné + une seule ligne de flux ──
+    if (sumMode) {
+      const active = routersTotalW > 10;
+      const sumVal = this._el('sfcRouterSumVal');
+      if (sumVal) {
+        sumVal.textContent = routersTotalW >= 1000 ? (routersTotalW/1000).toFixed(2)+' kW' : Math.round(routersTotalW)+' W';
+        sumVal.className = 'sfc-router-val' + (active ? '' : ' inactive');
+      }
+      const sumNode = this._el('sfcRouterNodeSum');
+      if (sumNode) sumNode.classList.toggle('active', active);
+      // une seule ligne maison → routeurs (sfcLR1), les autres masquées
+      ['sfcLR2','sfcLR3','sfcLR4'].forEach(id => { const l = this._el(id); if (l) l.style.display = 'none'; });
+      const l1 = this._el('sfcLR1');
+      if (l1) {
+        l1.style.display = '';
+        l1.setAttribute('d', 'M 210,40 Q 250,20 290,40');
+        l1.classList.toggle('active', active);
+        l1.classList.toggle('inactive', !active);
+      }
+    }
+
+    // Ligne batterie depuis dernier routeur (ou maison)
+    const lastX = routerXs.length > 0 ? routerXs[routerXs.length-1] : 210;
+    const lineBatt = this._el('sfcLB');
+    // Même logique que dans _update() : priorité à batt_power (respecte batt_power_invert).
+    let battPowerR = c.batt_power ? this._getNum(c.batt_power) : null;
+    if (battPowerR !== null && c.batt_power_invert) battPowerR = -battPowerR;
+    const isDischarging = (battPowerR !== null && Math.abs(battPowerR) > 10)
+      ? battPowerR < 0
+      : this._getNum(this._cfg.home_power) > this._getNum(this._cfg.pv_power) + 100;
+    if (lineBatt && nRouters > 0) {
+      const battFlowIds = ['sfcLB','sfcLBTailLong','sfcLBTailMid','sfcLBGlow'];
+      if (isDischarging) {
+        const path = `M 355,40 L ${lastX+14},40`;
+        this._setFlowPath(battFlowIds, path);
+        lineBatt.setAttribute('marker-end', 'url(#arrowDis)');
+      } else {
+        const path = `M ${lastX+14},40 L 355,40`;
+        this._setFlowPath(battFlowIds, path);
+        lineBatt.setAttribute('marker-end', 'url(#arrowBatt)');
+      }
+    }
+
+    // ── Section Routeurs : sous-lignes énergie jour / mois / année / total ──
+    // Une période n'est affichée que si son entité est configurée ET disponible (non vide).
+    const fmtKwh = v => v >= 1000 ? (v / 1000).toFixed(2) + ' MWh' : v.toFixed(v < 10 ? 2 : 1) + ' kWh';
+    // Gère les listes à virgules : vrai si AU MOINS une entité a une valeur exploitable.
+    const hasState = ids => {
+      if (!ids) return false;
+      return String(ids).split(',').some(part => {
+        const id = part.trim();
+        if (!id) return false;
+        const st = this._hass.states[id];
+        return !!st && st.state !== 'unavailable' && st.state !== 'unknown' && st.state !== '';
+      });
+    };
+    activeRouters.forEach(n => {
+      // Énergie du JOUR — donnée secondaire mise en avant (pastille). Capteur si fourni,
+      // sinon estimation '~' calculée par la carte.
+      const dayEl = this._el('sfcRDay' + n);
+      if (dayEl) {
+        let dayTxt = null;
+        if (hasState(c['router' + n + '_energy'])) {
+          dayTxt = fmtKwh(this._getNum(c['router' + n + '_energy']));
+        } else if (this._rtEnergy && this._rtEnergy[n]) {
+          dayTxt = '~' + fmtKwh(this._rtEnergy[n].kwh);
+        }
+        if (dayTxt !== null) {
+          dayEl.innerHTML = `<small>${t(c, 'rt_day')}</small>${dayTxt}`;
+          dayEl.style.display = '';
+        } else {
+          dayEl.style.display = 'none';
+        }
+      }
+      // Mois / Année / Total — donnée tertiaire discrète
+      const subEl = this._el('sfcREn' + n + 'Sub');
+      if (subEl) {
+        const parts = [];
+        if (hasState(c['router' + n + '_energy_month'])) parts.push(t(c, 'rt_month') + ' ' + fmtKwh(this._getNum(c['router' + n + '_energy_month'])));
+        if (hasState(c['router' + n + '_energy_year']))  parts.push(t(c, 'rt_year')  + ' ' + fmtKwh(this._getNum(c['router' + n + '_energy_year'])));
+        if (hasState(c['router' + n + '_energy_total'])) parts.push(t(c, 'rt_total') + ' ' + fmtKwh(this._getNum(c['router' + n + '_energy_total'])));
+        subEl.innerHTML = parts.join('<br>');
+      }
+    });
+  }
+
+  // Convertit un point (x,y) du viewBox 1536×1024 en % de la scène,
+  // en tenant compte du letterbox preserveAspectRatio="xMidYMax meet".
+  _svgToScenePct(svgX, svgY) {
+    const svg   = this._el('sfcSingleFlowSvg');
+    const scene = this._el('sfcUnifiedScene');
+    if (!svg || !scene) return null;
+    const sr = svg.getBoundingClientRect();
+    const pr = scene.getBoundingClientRect();
+    if (!sr.width || !sr.height || !pr.width || !pr.height) return null;
+    const scale = Math.min(sr.width / 1536, sr.height / 1024);
+    const rw = 1536 * scale, rh = 1024 * scale;
+    const ox = (sr.width - rw) / 2;   // xMid : centré horizontalement
+    const oy = sr.height - rh;        // YMax : aligné en bas
+    const px = (sr.left - pr.left) + ox + svgX * scale;
+    const py = (sr.top  - pr.top)  + oy + svgY * scale;
+    return { x: (px / pr.width * 100).toFixed(2), y: (py / pr.height * 100).toFixed(2) };
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  SOLEIL & MÉTÉO (coords, lever/coucher, FX météo)
+  // ────────────────────────────────────────────────────────
+  // Coordonnées utilisées pour le calcul du soleil, par ordre de priorité :
+  // 1) latitude/longitude renseignées dans la config de la carte (prioritaire — toujours modifiable)
+  // 2) localisation de la maison Home Assistant (hass.config) — repli automatique
+  // 3) Paris en dernier recours (si HA indisponible)
+  // isNaN() (et non « || ») pour accepter les valeurs légitimes 0 (équateur / méridien de Greenwich).
+  _getCoords() {
+    const c = this._cfg;
+    const lat = parseFloat(c.latitude);
+    const lon = parseFloat(c.longitude);
+    return {
+      lat: !isNaN(lat) ? lat : (this._hass?.config?.latitude ?? 48.8566),
+      lon: !isNaN(lon) ? lon : (this._hass?.config?.longitude ?? 2.3522),
+    };
+  }
+
+  // Résout une heure de lever/coucher depuis HA, ramenée à AUJOURD'HUI (pour la progression
+  // de l'arc) : 1) entité configurée (timestamp ISO), 2) attribut de sun.sun, sinon null.
+  // L'entité sun.sun next_rising peut pointer sur demain → on ne garde que l'heure du jour.
+  _resolveSunTime(entityId, sunAttr) {
+    const norm = (val) => {
+      if (!val) return null;
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return null;
+      const t = new Date();
+      t.setHours(d.getHours(), d.getMinutes(), d.getSeconds(), 0);
+      return t;
+    };
+    if (entityId && this._hass?.states[entityId]) {
+      const st = this._hass.states[entityId];
+      if (st.state !== 'unavailable' && st.state !== 'unknown') {
+        const t = norm(st.state);
+        if (t) return t;
+      }
+    }
+    const sun = this._hass?.states['sun.sun'];
+    if (sun && sun.attributes && sun.attributes[sunAttr]) {
+      const t = norm(sun.attributes[sunAttr]);
+      if (t) return t;
+    }
+    return null;
+  }
+
+  // Met à jour le soleil/la lune (position sur l'arc), lever/coucher, ciel, étoiles, nuages et
+  // l'image de scène jour/nuit, à partir de l'élévation (entité HA ou calcul interne).
+  _updateSun(cloudyOverride) {
+
+    const c   = this._cfg;
+    const now = new Date();
+    const { lat, lon } = this._getCoords();
+    let elevation, azimuth;
+    const haElevState = c.sun_elevation ? this._hass?.states[c.sun_elevation] : null;
+    if (haElevState && haElevState.state !== 'unavailable' && haElevState.state !== 'unknown') {
+      elevation = parseFloat(haElevState.state) || 0;
+      const haAzState = c.sun_azimuth ? this._hass?.states[c.sun_azimuth] : null;
+      azimuth = haAzState ? (parseFloat(haAzState.state) ?? 180) : 180;
+    } else {
+      const sp = computeSunPosition(now, lat, lon);
+      elevation = sp.elevation; azimuth = sp.azimuth;
+    }
+
+    // Lever / coucher : priorité aux entités HA (exactes, TZ/DST gérés) →
+    // 1) entités configurées sun_rise/sun_set, 2) attributs de sun.sun, 3) calcul interne.
+    let sunrise = this._resolveSunTime(c.sun_rise, 'next_rising');
+    let sunset  = this._resolveSunTime(c.sun_set,  'next_setting');
+    if (!sunrise || !sunset) {
+      const ss = computeSunriseSunset(now, lat, lon);
+      if (!sunrise) sunrise = ss.sunrise;
+      if (!sunset)  sunset  = ss.sunset;
+    }
+    const isSingle = c.img_scene_mode === 'single';
+    const srEl = this._el('sfcSunrise');
+    if (srEl) {
+      srEl.textContent = '🌅 ' + formatTime(sunrise);
+      srEl.style.bottom = '190px';
+    }
+    const ssEl = this._el('sfcSunset');
+    if (ssEl) {
+      ssEl.textContent = '🌇 ' + formatTime(sunset);
+      ssEl.style.bottom = '190px';
+    }
+    // Mode single : lever/coucher dans le SVG global
+    const srSvg = this._el('sfcSGSunrise');
+    if (srSvg) srSvg.textContent = '🌅 ' + formatTime(sunrise);
+    const ssSvg = this._el('sfcSGSunset');
+    if (ssSvg) ssSvg.textContent = formatTime(sunset) + ' 🌇';
+
+    let progress = 0.5;
+    if (sunrise && sunset) {
+    const totalMs = sunset.getTime() - sunrise.getTime();
+    const elapsedMs = now.getTime() - sunrise.getTime();
+    if (totalMs > 0) progress = elapsedMs / totalMs;
+    }
+    // Pas de correction azimuth — une seule source de vérité
+    progress = Math.max(0, Math.min(1, progress));
+
+    const tt   = progress;
+    // Ancien arc quadratique (viewBox 520×200) — utilisé pour le glow/arc du mode séparé
+    const bx   = (1-tt)*(1-tt)*40  + 2*(1-tt)*tt*260 + tt*tt*480;
+    const by   = (1-tt)*(1-tt)*175 + 2*(1-tt)*tt*30  + tt*tt*175;
+    // Mode single « réel » = single ET images affichées (sans images, on retombe sur l'arc standard)
+    const isSingleMode = c.img_scene_mode === 'single' && c.show_images !== false;
+    const skyFraction = isSingleMode ? 0.35 : 0.55;
+    let pctX = (bx / 520) * 100;
+    // Décalage fixe pour que le soleil reste au-dessus de l'arc
+    let pctY = Math.max(1, (by / 200) * skyFraction * 100 - 4);
+
+    // Mode single : position le long du Bézier cubique Figma (coords 1536×1024)
+    let sgx = null, sgy = null;
+    if (isSingleMode) {
+      const mt = 1 - tt;
+      sgx = mt*mt*mt*127 + 3*mt*mt*tt*544 + 3*mt*tt*tt*999 + tt*tt*tt*1416;
+      sgy = mt*mt*mt*150 + 3*mt*mt*tt*(-95.5) + 3*mt*tt*tt*(-95.5) + tt*tt*tt*150;
+      // Soleil au-dessus de l'arc (−95 unités SVG)
+      const pos = this._svgToScenePct(sgx, sgy - 95);
+      if (pos) { pctX = pos.x; pctY = pos.y; }
+    }
+
+    const orb = this._el('sfcSunOrb');
+    const isNight = elevation < -3;
+    if (orb) {
+    orb.style.left  = pctX + '%';
+    orb.style.top   = pctY + '%';
+    orb.style.opacity = isNight ? '0' : elevation < 5 ? '0.7' : '1';
+    }
+
+    // Lune — visible dès que la nuit tombe, entité moon_phase optionnelle
+    const moonEl = this._el('sfcMoonOrb');
+    if (moonEl) {
+      if (isNight) {
+        // Table de correspondance phase → emoji
+        const MOON_PHASES = {
+          'new_moon':        '🌑', 'waxing_crescent': '🌒',
+          'first_quarter':   '🌓', 'waxing_gibbous':  '🌔',
+          'full_moon':       '🌕', 'waning_gibbous':  '🌖',
+          'last_quarter':    '🌗', 'waning_crescent': '🌘',
+        };
+        // Si l'entité moon_phase est configurée, lire la phase ; sinon icône générique 🌙
+        const phase = c.moon_phase ? (this._getState(c.moon_phase) || '') : '';
+        moonEl.textContent = MOON_PHASES[phase] || '🌙';
+        moonEl.style.display = '';
+        // Position : courbe de Bézier inversée par rapport au soleil
+        // progress est dans [0,1] (clampé), on extrapole pour la nuit
+        const nightProgress = progress < 0.5 ? 1 - progress * 0.5 : 0.5 + (1 - progress) * 0.5;
+        const mt = Math.max(0, Math.min(1, nightProgress));
+        if (isSingleMode) {
+          // Même arc Bézier cubique que le soleil (coords 1536×1024)
+          const nt = 1 - mt;
+          const mgx = nt*nt*nt*127 + 3*nt*nt*mt*544 + 3*nt*mt*mt*999 + mt*mt*mt*1416;
+          const mgy = nt*nt*nt*150 + 3*nt*nt*mt*(-95.5) + 3*nt*mt*mt*(-95.5) + mt*mt*mt*150;
+          // Lune au-dessus de l'arc, même décalage que le soleil (−95)
+          const pos = this._svgToScenePct(mgx, mgy - 95);
+          if (pos) { moonEl.style.left = pos.x + '%'; moonEl.style.top = pos.y + '%'; }
+        } else {
+          const mx = (1-mt)*(1-mt)*40 + 2*(1-mt)*mt*260 + mt*mt*480;
+          const my = (1-mt)*(1-mt)*175 + 2*(1-mt)*mt*30 + mt*mt*175;
+          moonEl.style.left = ((mx / 520) * 100) + '%';
+          moonEl.style.top  = Math.max(1, (my / 200) * 0.55 * 100 - 4) + '%';
+        }
+      } else {
+        moonEl.style.display = 'none';
+      }
+    }
+    const inner = this._el('sfcSunInner');
+    if (inner) inner.style.background = elevation < 10
+      ? 'radial-gradient(circle at 35% 35%,#fff 0%,#FF8C00 40%,#CC4400 100%)'
+      : 'radial-gradient(circle at 35% 35%,#fff 0%,#FFD700 40%,#FF8C00 100%)';
+    const glowEl = this._el('sfcGlowEl');
+    if (glowEl) { glowEl.setAttribute('cx', bx.toFixed(1)); glowEl.setAttribute('cy', by.toFixed(1)); }
+    const arcDone = this._el('sfcArcDone');
+    if (arcDone) arcDone.style.strokeDashoffset = (1000*(1-progress)).toFixed(0);
+
+    // Mode single : glow + arc progressif dans la frame unique (sfcSingleFlowSvg)
+    if (isSingleMode && sgx !== null) {
+      const glowS = this._el('sfcGlowEl_s');
+      if (glowS) {
+        glowS.setAttribute('cx', sgx.toFixed(1));
+        glowS.setAttribute('cy', sgy.toFixed(1));
+        glowS.style.opacity = isNight ? '0' : '1';
+      }
+      const arcDoneS = this._el('sfcArcDone_s');
+      if (arcDoneS && arcDoneS.getTotalLength) {
+        const len = arcDoneS.getTotalLength() || 1700;
+        arcDoneS.style.strokeDasharray  = len.toFixed(0);
+        arcDoneS.style.strokeDashoffset = (len * (1 - progress)).toFixed(0);
+      }
+    }
+
+    const sceneImg = this._el('sfcSceneImg');
+    if (sceneImg) {
+      const variantKey = (c.img_scene_variant || 'esc_ev').replace(/^esc_/, '');
+      const dayImg = c[`img_scene_day_${variantKey}`] || c.img_scene_day;
+      const nightImg = c[`img_scene_night_${variantKey}`] || c.img_scene_night;
+      const sceneSrc = isNight ? (nightImg || dayImg) : (dayImg || nightImg);
+      if (sceneSrc) {
+        sceneImg.src = sceneSrc;
+        sceneImg.style.display = '';
+      } else {
+        sceneImg.style.display = 'none';
+      }
+    }
+    const sky = this._el('sfcSky');
+    const wi  = getWeather(this._getState(c.weather) || '');
+    if (sky) sky.style.background = skyGradient(elevation, cloudyOverride !== undefined ? cloudyOverride : wi);
+
+    const stars = this._el('sfcStars');
+    if (stars) stars.style.opacity = elevation < 0 ? Math.min(1, -elevation/8).toFixed(2) : '0';
+
+    // Nuages météo — voile atmosphérique
+    const clouds = this._el('sfcClouds');
+    if (clouds) {
+      const cover = wi.cloud || 0;
+      // Ciel clair/ensoleillé : quelques nuages très transparents (0.35) au lieu de quasi-invisibles.
+      clouds.style.opacity = cover >= 0.8 ? '0.6' : cover >= 0.3 ? '0.7' : '0.35';
+    }
+    // Nuages distincts (cumulus) — partiellement nuageux uniquement
+    const partlyClouds = this._el('sfcPartlyClouds');
+    if (partlyClouds) {
+      const isPartly = wi && wi.cloud <= 0.55 && wi.cloudy && !wi.rain && !wi.snow && !wi.fog && !wi.storm;
+      partlyClouds.style.opacity = isPartly ? '1' : '0';
+    }
+
+    const stl = this._el('sfcSunTime');
+    if (stl) stl.textContent = now.toLocaleTimeString(c.language==='en'?'en-GB':'fr-FR',{hour:'2-digit',minute:'2-digit'}) + ' · ' + Math.round(elevation) + '°';
+
+    // Ciel/météo canvas (mode single) — pousse l'état courant au renderer.
+    this._updateSceneRenderer(elevation, azimuth);
+  }
+
+  // Effets météo : pluie, neige, foudre (génère les particules + planifie les flashs d'orage).
+  _updateWeatherFx(wi) {
+    const rainEl  = this._el('sfcRain');
+    const snowEl  = this._el('sfcSnow');
+    const lightEl = this._el('sfcLightningFx');
+
+    // Pluie
+    if (rainEl) {
+      if (wi.rain && !wi.snow) {
+        if (!rainEl._init) {
+          rainEl.innerHTML = '';
+          const heavy = wi.cloud >= 0.95;
+          const count = heavy ? 70 : 40;
+          for (let i = 0; i < count; i++) {
+            const d = document.createElement('div');
+            d.className = 'sfc-raindrop';
+            const dur = heavy ? (0.28 + Math.random() * 0.3) : (0.5 + Math.random() * 0.5);
+            d.style.cssText = [
+              `left:${(Math.random()*110 - 5).toFixed(1)}%`,
+              `height:${(12 + Math.random()*18).toFixed(0)}px`,
+              `animation-duration:${dur.toFixed(2)}s`,
+              `animation-delay:${(-(Math.random()*dur*4)).toFixed(2)}s`,
+              `opacity:${(heavy ? 0.5 + Math.random()*0.4 : 0.3 + Math.random()*0.4).toFixed(2)}`,
+            ].join(';');
+            rainEl.appendChild(d);
+          }
+          rainEl._init = true;
+        }
+        rainEl.style.display = '';
+      } else {
+        rainEl.style.display = 'none';
+        if (rainEl._init) { rainEl.innerHTML = ''; rainEl._init = false; }
+      }
+    }
+
+    // Neige
+    if (snowEl) {
+      if (wi.snow) {
+        if (!snowEl._init) {
+          snowEl.innerHTML = '';
+          for (let i = 0; i < 45; i++) {
+            const f = document.createElement('div');
+            f.className = 'sfc-snowflake';
+            const sz = (2 + Math.random() * 5).toFixed(1);
+            const dur = (3 + Math.random() * 5).toFixed(2);
+            f.style.cssText = [
+              `left:${(Math.random()*110 - 5).toFixed(1)}%`,
+              `width:${sz}px`, `height:${sz}px`,
+              `animation-duration:${dur}s`,
+              `animation-delay:${(-(Math.random()*parseFloat(dur)*2)).toFixed(2)}s`,
+              `opacity:${(0.55 + Math.random()*0.4).toFixed(2)}`,
+            ].join(';');
+            snowEl.appendChild(f);
+          }
+          snowEl._init = true;
+        }
+        snowEl.style.display = '';
+      } else {
+        snowEl.style.display = 'none';
+        if (snowEl._init) { snowEl.innerHTML = ''; snowEl._init = false; }
+      }
+    }
+
+    // Foudre
+    if (lightEl) {
+      if (wi.storm) {
+        lightEl.style.display = '';
+        if (!this._lightningTimer) {
+          const flash = () => {
+            lightEl.classList.remove('sfc-flash');
+            void lightEl.offsetWidth;
+            lightEl.classList.add('sfc-flash');
+          };
+          const schedule = () => {
+            this._lightningTimer = setTimeout(() => {
+              if (this._el('sfcLightningFx')) { flash(); schedule(); }
+              else this._lightningTimer = null;
+            }, 4000 + Math.random() * 9000);
+          };
+          flash();
+          schedule();
+        }
+      } else {
+        lightEl.style.display = 'none';
+        lightEl.classList.remove('sfc-flash');
+        if (this._lightningTimer) { clearTimeout(this._lightningTimer); this._lightningTimer = null; }
+      }
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  EDITOR (classe éditeur de configuration)
+// ══════════════════════════════════════════════════════════
+const EDITOR_EXTRA_CSS = `
+  /* Bouton Appliquer supprimé — sauvegarde via bouton natif HA */
+  .sfc-ed-range { width:100%; accent-color:#14a085; cursor:pointer; margin-top:4px; }
+  .sfc-range-val { font-family:monospace; color:#14a085; font-weight:700; }
+  .sfc-ord-row { display:flex; align-items:center; justify-content:space-between;
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+    border-radius:8px; padding:6px 10px; }
+  .sfc-ord-lbl { font-size:12px; color:#e0e0e0; }
+  .sfc-ord-btns { display:flex; gap:4px; }
+  .sfc-ord-btn { width:28px; height:26px; border:none; border-radius:6px; cursor:pointer;
+    background:#14a085; color:#fff; font-size:12px; line-height:1; }
+  .sfc-ord-btn:hover { background:#0d7377; }
+  .sfc-ord-btn:disabled { background:rgba(255,255,255,.1); color:rgba(255,255,255,.3); cursor:default; }
+`;
+
+class SolarFlowCardEditor extends HTMLElement {
+  // ────────────────────────────────────────────────────────
+  //  CYCLE DE VIE & CONFIG
+  // ────────────────────────────────────────────────────────
+  // Initialise l'état de l'éditeur : brouillon de config + drapeaux ready/dirty.
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._draft = { ...DEFAULTS };
+    this._pendingConfig = null;
+    this._ready = false;
+    this._dirty = false;
+  }
+
+  // HA fournit l'objet hass aux éditeurs de configuration → on s'en sert pour
+  // peupler l'autocomplétion des entités (datalist).
+  set hass(hass) {
+    this._hass = hass;
+    this._refreshEntityDatalist();
+  }
+  // Getter hass (requis par certains contextes HA).
+  get hass() { return this._hass; }
+
+  // Reçoit la config : 1er appel → construit le DOM ; ensuite → rebuild si champ structurel, sinon repopulate.
+  setConfig(config) {
+    const incoming = { ...DEFAULTS, ...config };
+    if (!this._ready) {
+      this._draft = incoming;
+      this._pendingConfig = incoming;
+      if (this.shadowRoot) { this._buildDOM(); this._ready = true; this._pendingConfig = null; }
+    } else {
+      // Reconstruire seulement si un champ "structurel" (qui pilote l'affichage
+      // conditionnel) a changé — ex. price_mode. Sinon _populateAll (non destructif,
+      // ne casse pas la saisie en cours lors des échos de config-changed).
+      const prevSig = this._structSig(this._draft);
+      this._draft = incoming;
+      if (this._structSig(incoming) !== prevSig) this._rebuildKeepOpen();
+      else this._populateAll();
+    }
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  RENDU & PEUPLEMENT DU FORMULAIRE
+  // ────────────────────────────────────────────────────────
+  // Signature des champs qui conditionnent l'affichage de sections dans l'éditeur (déclenche un rebuild).
+  _structSig(d) {
+    d = d || {};
+    return [
+      d.img_scene_mode, d.img_scene_variant, d.batt_bar_mode, d.pwr_mode,
+      d.price_mode, !!d.price_entity, !!d.export_paid, !!d.endurance_entity,
+      d.savings_mode, !!d.notif_balance_enabled,
+    ].join('|');
+  }
+
+  // Construit le DOM au premier attachement, si ce n'est pas déjà fait.
+  connectedCallback() {
+    if (!this._ready) {
+      if (this._pendingConfig) { this._draft = this._pendingConfig; this._pendingConfig = null; }
+      this._buildDOM();
+      this._ready = true;
+    }
+  }
+
+  // Génère le HTML de l'éditeur, peuple les champs, attache les écouteurs et la datalist d'entités.
+  _buildDOM() {
+    this.shadowRoot.innerHTML = `<style>${CARD_CSS}${EDITOR_EXTRA_CSS}</style>` + buildEditorHTML(this._draft);
+    this._populateAll();
+    this._attachListeners();
+    this._refreshEntityDatalist();
+  }
+
+  // Peuple la <datalist> avec les entités HA pertinentes → autocomplétion des champs entité.
+  _refreshEntityDatalist() {
+    if (!this._hass || !this.shadowRoot) return;
+    const dl = this.shadowRoot.getElementById('sfcEntityList');
+    if (!dl) return;
+    const ids = Object.keys(this._hass.states || {});
+    if (dl._count === ids.length) return;   // déjà à jour → évite de reconstruire à chaque hass
+    dl._count = ids.length;
+    const domains = ['sensor','binary_sensor','weather','sun','select','number','input_number','input_boolean','switch'];
+    dl.innerHTML = ids
+      .filter(id => domains.includes(id.split('.')[0]))
+      .sort()
+      .map(id => `<option value="${id}"></option>`)
+      .join('');
+  }
+
+  // Recopie les valeurs du brouillon dans les champs du formulaire (non destructif).
+  _populateAll() {
+    const d = this._draft;
+    this.shadowRoot.querySelectorAll('[data-key]').forEach(el => {
+      const k = el.dataset.key;
+      if (el.dataset.toggle)    el.classList.toggle('on', d[k] !== false);
+      else if (el.type==='color') el.value = d[k] || DEFAULTS[k] || '#ffffff';
+      else if (el.dataset.colorKey) el.value = d[el.dataset.colorKey] || '';
+      else el.value = (d[k] !== undefined && d[k] !== null) ? String(d[k]) : '';
+    });
+  }
+
+  // Reconstruit l'éditeur en gardant les sections ouvertes (pour les champs conditionnels)
+  _rebuildKeepOpen() {
+    const openSecs = [...this.shadowRoot.querySelectorAll('.sfc-ed-body.open')].map(b => b.id);
+    this._buildDOM();
+    openSecs.forEach(id => {
+      const body = this.shadowRoot.getElementById(id);
+      if (!body) return;
+      body.classList.add('open');
+      const hdr = this.shadowRoot.querySelector(`[data-section="${id.replace('sfc-sec-','')}"]`);
+      if (hdr) { hdr.classList.add('active'); const chev = hdr.querySelector('.sfc-ed-chevron'); if (chev) chev.classList.add('open'); }
+    });
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  ÉCOUTEURS & SAUVEGARDE
+  // ────────────────────────────────────────────────────────
+  // Branche tous les écouteurs : en-têtes de sections, champs, toggles, sliders, couleurs,
+  // autocomplétion entités, boutons d'ordre des sections et reset.
+  _attachListeners() {
+    this.shadowRoot.querySelectorAll('.sfc-ed-section-header').forEach(h => {
+      h.addEventListener('click', () => {
+        const body = this.shadowRoot.getElementById('sfc-sec-' + h.dataset.section);
+        const chev = h.querySelector('.sfc-ed-chevron');
+        if (!body) return;
+        const open = body.classList.toggle('open');
+        chev && chev.classList.toggle('open', open);
+        h.classList.toggle('active', open);
+      });
+    });
+
+    this.shadowRoot.querySelectorAll('[data-key]').forEach(el => {
+      const k = el.dataset.key;
+      if (el.tagName === 'SELECT') {
+        el.addEventListener('change', () => {
+          this._draft = { ...this._draft, [k]: el.value };
+          this._rebuildKeepOpen();   // certains selects révèlent des champs conditionnels
+          this._apply();
+        });
+      } else if (el.dataset.toggle) {
+        el.addEventListener('click', () => {
+          el.classList.toggle('on');
+          this._draft = { ...this._draft, [k]: el.classList.contains('on') };
+          this._rebuildKeepOpen();   // certains toggles révèlent des champs (ex. export rémunéré)
+          this._apply();
+        });
+      } else if (el.type === 'range') {
+        el.addEventListener('input', () => {
+          const v = parseFloat(el.value);
+          this._draft = { ...this._draft, [k]: v };
+          const span = this.shadowRoot.querySelector(`[data-range-for="${k}"]`);
+          if (span) span.textContent = v.toFixed(2) + '×';
+          this._setDirty();
+        });
+      } else if (el.type === 'color') {
+        el.addEventListener('change', () => { const txt = this.shadowRoot.querySelector(`[data-color-key="${k}"]`); if (txt) txt.value = el.value; this._draft = { ...this._draft, [k]: el.value }; this._setDirty(); });
+      } else if (el.dataset.colorKey) {
+        el.addEventListener('input', () => { const ck = el.dataset.colorKey; if (/^#[0-9a-fA-F]{6}$/.test(el.value)) { const col = this.shadowRoot.querySelector(`[data-key="${ck}"][type="color"]`); if (col) col.value = el.value; } this._draft = { ...this._draft, [ck]: el.value }; this._setDirty(); });
+      } else {
+        el.addEventListener('input', () => { let v = el.value; if (el.type==='number') { const n=parseFloat(v); if(!isNaN(n)) v=n; } this._draft = { ...this._draft, [k]: v }; this._setDirty(); });
+      }
+    });
+
+    // Autocomplétion entités : on relie à la <datalist> les champs texte qui attendent une
+    // entité — détectés via un placeholder de forme « domaine.entité » (sensor.xxx, weather.xxx…).
+    // Les champs libres (chemins d'image, libellés, nombres) ne matchent pas → pas de suggestion.
+    this.shadowRoot.querySelectorAll('input.sfc-ed-input[data-key]').forEach(el => {
+      if (el.type === 'number' || el.type === 'color') return;
+      const ph = el.getAttribute('placeholder') || '';
+      if (/^[a-z_]+\.[a-z0-9_]+/.test(ph)) {
+        el.setAttribute('list', 'sfcEntityList');
+        el.setAttribute('autocomplete', 'off');   // évite l'autocomplétion navigateur par-dessus
+      }
+    });
+
+    // Boutons ▲▼ d'ordre des sections
+    this.shadowRoot.querySelectorAll('[data-ord-up],[data-ord-down]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const up  = btn.dataset.ordUp;
+        const key = up || btn.dataset.ordDown;
+        const order = normalizeSectionOrder(this._draft.section_order);
+        const i = order.indexOf(key);
+        const j = up ? i - 1 : i + 1;
+        if (i < 0 || j < 0 || j >= order.length) return;
+        [order[i], order[j]] = [order[j], order[i]];
+        this._draft = { ...this._draft, section_order: order };
+        this._rebuildKeepOpen();
+        this._apply();
+      });
+    });
+
+    const rst = this.shadowRoot.getElementById('sfcEdReset');
+    if (rst) rst.addEventListener('click', () => { this._draft = { ...DEFAULTS }; this._populateAll(); this._apply(); });
+  }
+
+  // Marque l'éditeur comme modifié et programme un dispatch config-changed debouncé.
+  _setDirty() {
+    // Dispatch automatique avec debounce 300ms — le bouton Save de HA prend le relais
+    clearTimeout(this._applyTimer);
+    this._applyTimer = setTimeout(() => this._apply(), 300);
+  }
+
+  // Émet l'événement config-changed avec le brouillon courant (HA persiste la config).
+  _apply() {
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: { ...this._draft } }, bubbles: true, composed: true }));
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  REGISTER
+// ══════════════════════════════════════════════════════════
+customElements.define('solar-flow-card', SolarFlowCard);
+customElements.define('solar-flow-card-editor', SolarFlowCardEditor);
+
+window.customCards = window.customCards || [];
+window.customCards.push({ type:'solar-flow-card', name:'Solar Flow Card', description:'Arc solaire animé, météo dynamique, flux énergie temps réel', preview:true });
+
+console.info(`%c☀️ SOLAR FLOW CARD %c v${VERSION} `,
+  'background:#0d7377;color:#fff;padding:2px 6px;border-radius:4px 0 0 4px;font-weight:700',
+  'background:#14a085;color:#fff;padding:2px 6px;border-radius:0 4px 4px 0;');
