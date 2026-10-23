@@ -2529,6 +2529,46 @@ const CARD_CSS = `
 // ══════════════════════════════════════════════════════════
 // Construit le HTML complet de la carte : scène (mode single/séparé), barres %, et toutes les
 // sections (PV, conso, batterie, santé, routeurs, économies, EV) assemblées selon section_order.
+// ══════════════════════════════════════════════════════════
+//  SCÈNE SINGLE : POSITIONS RÉGLABLES (scene_layout)
+// ══════════════════════════════════════════════════════════
+// Repère = pixels de l'image de fond (viewBox 1536×1024). Toute clé absente de
+// scene_layout garde la position d'origine, calée sur l'image fournie avec la carte.
+// Flux = liste de points [x, y] du départ à l'arrivée · badge = [centre x, bord haut y]
+// battery_gauge = coin haut-gauche du cylindre (75×115), ou false pour le masquer.
+const SCENE_LAYOUT_DEFAULTS = {
+  flow_sun:      [[790, 15.5], [790, 224.5]],
+  flow_grid:     [[426, 915.5], [860.5, 704.5], [579, 660.5], [748, 608]],
+  flow_battery:  [[945, 623.5], [1402, 639.5]],
+  flow_router1:  [[718, 608], [544, 660.5], [417.5, 646.5], [364.5, 660.5]],
+  flow_router2:  [[865.5, 597.5], [865.5, 514.5], [1333.5, 514.5]],
+  flow_ev:       [[916.5, 597.5], [1140, 597.5]],
+  badge_grid:    [210, 836],
+  badge_battery: [1414, 686],
+  badge_router1: [195, 562],
+  badge_router2: [1268, 330],
+  badge_ev:      [1101, 678],
+  battery_gauge: [1420, 500],
+};
+const _slPoint  = p => Array.isArray(p) && p.length === 2 && p.every(n => Number.isFinite(Number(n)));
+const _slPoints = a => Array.isArray(a) && a.length >= 2 && a.every(_slPoint);
+function sceneLayout(c) {
+  const user = (c && c.scene_layout && typeof c.scene_layout === 'object') ? c.scene_layout : {};
+  const out = {};
+  for (const [k, def] of Object.entries(SCENE_LAYOUT_DEFAULTS)) {
+    const v = user[k];
+    if (k === 'battery_gauge' && v === false) out[k] = false;
+    else if (k.startsWith('flow_')) out[k] = _slPoints(v) ? v.map(q => [Number(q[0]), Number(q[1])]) : def;
+    else out[k] = _slPoint(v) ? [Number(v[0]), Number(v[1])] : def;
+  }
+  return out;
+}
+// Chemin SVG d'un flux ; reverse = sens inverse (export réseau, décharge, V2H)
+function scenePath(points, reverse) {
+  const pts = reverse ? [...points].reverse() : points;
+  return 'M' + pts.map(q => q[0] + ' ' + q[1]).join(' L');
+}
+
 function buildCardHTML(cfg) {
   const c = { ...DEFAULTS, ...cfg };
   const showBars    = c.show_progress_bars;
@@ -2559,6 +2599,14 @@ function buildCardHTML(cfg) {
   // Badge MAISON déplaçable via home_x / home_y. Défauts = position d'origine (720 / 387).
   const hx = Number(c.home_x) || 720;
   const hy = Number(c.home_y) || 387;
+  // Positions de la scène single (scene_layout) : flux, badges, jauge batterie
+  const L = sceneLayout(c);
+  const [gx, gy]   = L.badge_grid;      // badge RÉSEAU    : centre x / bord haut
+  const [bx, by]   = L.badge_battery;   // badge BATTERIE
+  const [s1x, s1y] = L.badge_router1;   // badge SPA (routeur 1)
+  const [s2x, s2y] = L.badge_router2;   // badge ECS (routeur 2)
+  const [evx, evy] = L.badge_ev;        // badge VOITURE
+  const bg = L.battery_gauge;           // jauge batterie : coin haut-gauche, ou false
 
   return `
   <div class="sfc-root ${c.details_on_click !== false ? 'sfc-clickable' : ''}" id="sfcRoot" style="
@@ -2751,7 +2799,7 @@ function buildCardHTML(cfg) {
           <defs>
             <!-- Clip cylindre batterie -->
             <clipPath id="sfcSVBattClip">
-              <rect x="1422" y="502" width="71" height="110" rx="4"/>
+              <rect x="${bg ? bg[0] + 2 : 1422}" y="${bg ? bg[1] + 2 : 502}" width="71" height="110" rx="4"/>
             </clipPath>
             <!-- Gradients liquide selon état — même logique que le mode séparé HTML -->
             <linearGradient id="sfcSVGradNeutral"   x1="0" y1="0" x2="0" y2="1">
@@ -2808,45 +2856,45 @@ function buildCardHTML(cfg) {
             style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:600;fill:rgba(232,244,253,0.65)">— 🌇</text>
 
           <!-- ── FLUX Soleil → Maison (rayon ciel, coords Figma M790 15.5 V224.5) ── -->
-          <path id="sfcSunFlowLine_s"     class="sfc-sun-flow-core"     stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(3*var(--sfc-sf,1))"   d="M 790,15.5 L 790,224.5"/>
-          <path id="sfcSunFlowTailLong_s" class="sfc-sun-flow-tail-long" stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(6.5*var(--sfc-sf,1))" d="M 790,15.5 L 790,224.5"/>
-          <path id="sfcSunFlowTailMid_s"  class="sfc-sun-flow-tail-mid"  stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(4.8*var(--sfc-sf,1))" d="M 790,15.5 L 790,224.5"/>
-          <path id="sfcSunFlowGlow_s"     class="sfc-sun-flow-neon"      stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(3.6*var(--sfc-sf,1))" d="M 790,15.5 L 790,224.5"/>
+          <path id="sfcSunFlowLine_s"     class="sfc-sun-flow-core"     stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_sun)}"/>
+          <path id="sfcSunFlowTailLong_s" class="sfc-sun-flow-tail-long" stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_sun)}"/>
+          <path id="sfcSunFlowTailMid_s"  class="sfc-sun-flow-tail-mid"  stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_sun)}"/>
+          <path id="sfcSunFlowGlow_s"     class="sfc-sun-flow-neon"      stroke="#FFD700" style="--flow-color:#FFD700;stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_sun)}"/>
 
           <!-- ── FLUX Grid ↔ Maison ── -->
-          <path id="sfcLG_s"         class="sfc-flow-core"      stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(3*var(--sfc-sf,1))"   d="M426 915.5 L860.5 704.5 L579 660.5 L748 608"/>
-          <path id="sfcLGTailLong_s" class="sfc-flow-tail-long" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(6.5*var(--sfc-sf,1))" d="M426 915.5 L860.5 704.5 L579 660.5 L748 608"/>
-          <path id="sfcLGTailMid_s"  class="sfc-flow-tail-mid"  stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(4.8*var(--sfc-sf,1))" d="M426 915.5 L860.5 704.5 L579 660.5 L748 608"/>
-          <path id="sfcLGGlow_s"     class="sfc-flow-neon"      stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(3.6*var(--sfc-sf,1))" d="M426 915.5 L860.5 704.5 L579 660.5 L748 608"/>
+          <path id="sfcLG_s"         class="sfc-flow-core"      stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_grid)}"/>
+          <path id="sfcLGTailLong_s" class="sfc-flow-tail-long" stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_grid)}"/>
+          <path id="sfcLGTailMid_s"  class="sfc-flow-tail-mid"  stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_grid)}"/>
+          <path id="sfcLGGlow_s"     class="sfc-flow-neon"      stroke="var(--sfc-grid,#4FC3F7)" style="--flow-color:var(--sfc-grid,#4FC3F7);stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_grid)}"/>
 
           <!-- ── FLUX Maison ↔ Batterie ── -->
-          <path id="sfcLB_s"         class="sfc-flow-core"      stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(3*var(--sfc-sf,1))"   d="M945 623.5 L1402 639.5"/>
-          <path id="sfcLBTailLong_s" class="sfc-flow-tail-long" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(6.5*var(--sfc-sf,1))" d="M945 623.5 L1402 639.5"/>
-          <path id="sfcLBTailMid_s"  class="sfc-flow-tail-mid"  stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(4.8*var(--sfc-sf,1))" d="M945 623.5 L1402 639.5"/>
-          <path id="sfcLBGlow_s"     class="sfc-flow-neon"      stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(3.6*var(--sfc-sf,1))" d="M945 623.5 L1402 639.5"/>
+          <path id="sfcLB_s"         class="sfc-flow-core"      stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_battery)}"/>
+          <path id="sfcLBTailLong_s" class="sfc-flow-tail-long" stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_battery)}"/>
+          <path id="sfcLBTailMid_s"  class="sfc-flow-tail-mid"  stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_battery)}"/>
+          <path id="sfcLBGlow_s"     class="sfc-flow-neon"      stroke="var(--sfc-batt,#69FF47)" style="--flow-color:var(--sfc-batt,#69FF47);stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_battery)}"/>
 
           <!-- ── FLUX Maison → Spa (router1) ── -->
           ${c.router1_enabled ? `
-          <path id="sfcLSpa_s"         class="sfc-flow-core"      stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(3*var(--sfc-sf,1))"   d="M718 608 L544 660.5 L417.5 646.5 L364.5 660.5"/>
-          <path id="sfcLSpaTailLong_s" class="sfc-flow-tail-long" stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(6.5*var(--sfc-sf,1))" d="M718 608 L544 660.5 L417.5 646.5 L364.5 660.5"/>
-          <path id="sfcLSpaTailMid_s"  class="sfc-flow-tail-mid"  stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(4.8*var(--sfc-sf,1))" d="M718 608 L544 660.5 L417.5 646.5 L364.5 660.5"/>
-          <path id="sfcLSpaGlow_s"     class="sfc-flow-neon"      stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(3.6*var(--sfc-sf,1))" d="M718 608 L544 660.5 L417.5 646.5 L364.5 660.5"/>
+          <path id="sfcLSpa_s"         class="sfc-flow-core"      stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_router1)}"/>
+          <path id="sfcLSpaTailLong_s" class="sfc-flow-tail-long" stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_router1)}"/>
+          <path id="sfcLSpaTailMid_s"  class="sfc-flow-tail-mid"  stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_router1)}"/>
+          <path id="sfcLSpaGlow_s"     class="sfc-flow-neon"      stroke="${c.router1_color||'#FFA040'}" style="--flow-color:${c.router1_color||'#FFA040'};stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_router1)}"/>
           ` : ''}
 
           <!-- ── FLUX Maison → ECS (router2) ── -->
           ${c.router2_enabled ? `
-          <path id="sfcLECS_s"         class="sfc-flow-core"      stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(3*var(--sfc-sf,1))"   d="M865.5 597.5 V514.5 H1333.5"/>
-          <path id="sfcLECSTailLong_s" class="sfc-flow-tail-long" stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(6.5*var(--sfc-sf,1))" d="M865.5 597.5 V514.5 H1333.5"/>
-          <path id="sfcLECSTailMid_s"  class="sfc-flow-tail-mid"  stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(4.8*var(--sfc-sf,1))" d="M865.5 597.5 V514.5 H1333.5"/>
-          <path id="sfcLECSGlow_s"     class="sfc-flow-neon"      stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(3.6*var(--sfc-sf,1))" d="M865.5 597.5 V514.5 H1333.5"/>
+          <path id="sfcLECS_s"         class="sfc-flow-core"      stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_router2)}"/>
+          <path id="sfcLECSTailLong_s" class="sfc-flow-tail-long" stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_router2)}"/>
+          <path id="sfcLECSTailMid_s"  class="sfc-flow-tail-mid"  stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_router2)}"/>
+          <path id="sfcLECSGlow_s"     class="sfc-flow-neon"      stroke="${c.router2_color||'#FFA040'}" style="--flow-color:${c.router2_color||'#FFA040'};stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_router2)}"/>
           ` : ''}
 
           <!-- ── FLUX Maison ↔ EV (bidirectionnel : charge / V2H) ── -->
           ${c.ev_enabled ? `
-          <path id="sfcLEV_s"         class="sfc-flow-core"      stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(3*var(--sfc-sf,1))"   d="M916.5 597.5 H1140"/>
-          <path id="sfcLEVTailLong_s" class="sfc-flow-tail-long" stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(6.5*var(--sfc-sf,1))" d="M916.5 597.5 H1140"/>
-          <path id="sfcLEVTailMid_s"  class="sfc-flow-tail-mid"  stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(4.8*var(--sfc-sf,1))" d="M916.5 597.5 H1140"/>
-          <path id="sfcLEVGlow_s"     class="sfc-flow-neon"      stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(3.6*var(--sfc-sf,1))" d="M916.5 597.5 H1140"/>
+          <path id="sfcLEV_s"         class="sfc-flow-core"      stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(3*var(--sfc-sf,1))"   d="${scenePath(L.flow_ev)}"/>
+          <path id="sfcLEVTailLong_s" class="sfc-flow-tail-long" stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(6.5*var(--sfc-sf,1))" d="${scenePath(L.flow_ev)}"/>
+          <path id="sfcLEVTailMid_s"  class="sfc-flow-tail-mid"  stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(4.8*var(--sfc-sf,1))" d="${scenePath(L.flow_ev)}"/>
+          <path id="sfcLEVGlow_s"     class="sfc-flow-neon"      stroke="var(--sfc-ev,#4FC3F7)" style="--flow-color:var(--sfc-ev,#4FC3F7);stroke-width:calc(3.6*var(--sfc-sf,1))" d="${scenePath(L.flow_ev)}"/>
           ` : ''}
 
           <!-- ══════════════════════════════════════════════════════════
@@ -2858,10 +2906,11 @@ function buildCardHTML(cfg) {
           <!-- Fond cylindre — ajuster x/y pour aligner sur la batterie murale de l'image.
                Référence : image 1536×1024, batterie mur droit garage.
                Pour décaler : modifier x (gauche/droite) et y (haut/bas) sur tous les éléments. -->
-          <rect x="1420" y="500" width="75" height="115" rx="6"
+${bg ? `
+          <rect x="${bg[0]}" y="${bg[1]}" width="75" height="115" rx="6"
             fill="rgba(6,13,26,0.78)" stroke="rgba(255,255,255,0.18)" stroke-width="2.5"/>
           <!-- Liquide (bottom-up) — y et height mis à jour par JS -->
-          <rect id="sfcSVBattFill" x="1422" y="562" width="71" height="63"
+          <rect id="sfcSVBattFill" x="${bg[0] + 2}" y="${bg[1] + 62}" width="71" height="63"
             fill="url(#sfcSVGradNeutral)" clip-path="url(#sfcSVBattClip)"/>
           <!-- Vagues de surface animées (gsap.ticker) — suivent le niveau du liquide -->
           <!-- Ordre DOM = empilement : C (fond) → B → A (1er plan) -->
@@ -2869,19 +2918,20 @@ function buildCardHTML(cfg) {
           <path id="sfcSVWaveB" clip-path="url(#sfcSVBattClip)" stroke="none"/>
           <path id="sfcSVWaveA" clip-path="url(#sfcSVBattClip)" stroke="none"/>
           <!-- Vague 1 (lente) — positionnée par GSAP sur la surface du liquide -->
-          <rect id="sfcSVBattWave1" x="1392" y="610" width="131" height="14" rx="7"
+          <rect id="sfcSVBattWave1" x="${bg[0] - 28}" y="${bg[1] + 110}" width="131" height="14" rx="7"
             fill="rgba(255,255,255,0.28)" clip-path="url(#sfcSVBattClip)" opacity="0"/>
           <!-- Vague 2 (rapide, sens inverse) -->
-          <rect id="sfcSVBattWave2" x="1402" y="610" width="111" height="10" rx="5"
+          <rect id="sfcSVBattWave2" x="${bg[0] - 18}" y="${bg[1] + 110}" width="111" height="10" rx="5"
             fill="rgba(255,255,255,0.16)" clip-path="url(#sfcSVBattClip)" opacity="0"/>
           <!-- Brillance gauche -->
-          <rect x="1422" y="502" width="14" height="110" rx="2"
+          <rect x="${bg[0] + 2}" y="${bg[1] + 2}" width="14" height="110" rx="2"
             fill="rgba(255,255,255,0.07)" clip-path="url(#sfcSVBattClip)" pointer-events="none"/>
           <!-- SOC % centré (Y = top_clip + height/2 = 502 + 55 = 557) -->
-          <text id="sfcSVBattSoc" x="1458" y="557"
+          <text id="sfcSVBattSoc" x="${bg[0] + 38}" y="${bg[1] + 57}"
             text-anchor="middle" dominant-baseline="middle"
             style="font-family:monospace;font-size:calc(40px*var(--sfc-sv,1));font-weight:900;fill:#fff;
                    paint-order:stroke fill;stroke:rgba(0,0,0,0.9);stroke-width:6">—%</text>
+          ` : ''}
 
           <!-- ══════════════════════════════════════════════════════════
                LABELS DE PUISSANCE
@@ -2891,63 +2941,63 @@ function buildCardHTML(cfg) {
 
           <!-- Spa (router1) — center x=265 -->
           ${c.router1_enabled ? `
-          <rect x="65" y="562" width="260" height="${(c.router1_temp ? 142 : 108) + (secSc ? 42 : 0)}" rx="9"
+          <rect x="${s1x - 130}" y="${s1y}" width="260" height="${(c.router1_temp ? 142 : 108) + (secSc ? 42 : 0)}" rx="9"
             fill="rgba(6,13,26,0.70)" stroke="rgba(255,160,64,0.25)" stroke-width="1.5"/>
-          <rect x="45" y="517" width="300" height="${(c.router1_temp ? 232 : 198) + (secSc ? 42 : 0)}" fill="transparent" data-detail="router1" style="pointer-events:all;cursor:pointer"/>
-          <text text-anchor="middle" x="195" y="593"
+          <rect x="${s1x - 150}" y="${s1y - 45}" width="300" height="${(c.router1_temp ? 232 : 198) + (secSc ? 42 : 0)}" fill="transparent" data-detail="router1" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${s1x}" y="${s1y + 31}"
             style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
                    fill:rgba(232,244,253,0.55)">${(c.router1_label||'SPA').toUpperCase()}</text>
-          <text id="sfcSGSpaVal" text-anchor="middle" x="195" y="${c.router1_temp ? '638' : '650'}"
+          <text id="sfcSGSpaVal" text-anchor="middle" x="${s1x}" y="${s1y + (c.router1_temp ? 76 : 88)}"
             style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
                    fill:${c.router1_color||'#FFA040'};filter:drop-shadow(0 0 4px ${c.router1_color||'#FFA040'})">0 W</text>
           ${c.router1_temp ? `
-          <text id="sfcSGSpaTemp" text-anchor="middle" x="195" y="686"
+          <text id="sfcSGSpaTemp" text-anchor="middle" x="${s1x}" y="${s1y + 124}"
             style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));font-weight:600;
                    fill:#7ecfff;filter:drop-shadow(0 0 3px rgba(126,207,255,0.5))">🌡 — °C</text>
           ` : ''}
-          ${secSc ? `<text id="sfcSGSpaEnergy" text-anchor="middle" x="195" y="${c.router1_temp ? '726' : '692'}"
+          ${secSc ? `<text id="sfcSGSpaEnergy" text-anchor="middle" x="${s1x}" y="${s1y + (c.router1_temp ? 164 : 130)}"
             style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.6)">—</text>` : ''}
           ` : ''}
 
           <!-- ECS (router2) — center x=1268 -->
           ${c.router2_enabled ? `
-          <rect x="1133" y="330" width="270" height="108" rx="9"
+          <rect x="${s2x - 135}" y="${s2y}" width="270" height="108" rx="9"
             fill="rgba(6,13,26,0.70)" stroke="rgba(255,160,64,0.25)" stroke-width="1.5"/>
-          <rect x="1113" y="285" width="310" height="198" fill="transparent" data-detail="router2" style="pointer-events:all;cursor:pointer"/>
-          <text text-anchor="middle" x="1268" y="361"
+          <rect x="${s2x - 155}" y="${s2y - 45}" width="310" height="198" fill="transparent" data-detail="router2" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${s2x}" y="${s2y + 31}"
             style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
                    fill:rgba(232,244,253,0.55)">${(c.router2_label||'ECS').toUpperCase()}</text>
-          <text id="sfcSGECSVal" text-anchor="middle" x="1268" y="418"
+          <text id="sfcSGECSVal" text-anchor="middle" x="${s2x}" y="${s2y + 88}"
             style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
                    fill:${c.router2_color||'#FFA040'};filter:drop-shadow(0 0 4px ${c.router2_color||'#FFA040'})">0 W</text>
           ` : ''}
 
           <!-- EV — center x=1101, positionné sous le chemin EV -->
           ${c.ev_enabled ? `
-          <rect x="975" y="678" width="253" height="${c.ev_soc ? '142' : '108'}" rx="9"
+          <rect x="${evx - 126}" y="${evy}" width="253" height="${c.ev_soc ? '142' : '108'}" rx="9"
             fill="rgba(6,13,26,0.72)" stroke="rgba(79,195,247,0.28)" stroke-width="1.5"/>
-          <rect x="955" y="633" width="293" height="${c.ev_soc ? '232' : '198'}" fill="transparent" data-detail="ev" style="pointer-events:all;cursor:pointer"/>
-          <text text-anchor="middle" x="1101" y="709"
+          <rect x="${evx - 146}" y="${evy - 45}" width="293" height="${c.ev_soc ? '232' : '198'}" fill="transparent" data-detail="ev" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${evx}" y="${evy + 31}"
             style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
                    fill:rgba(232,244,253,0.55)">${(c.ev_label||'VOITURE').toUpperCase()}</text>
-          <text id="sfcSGEVPwr" text-anchor="middle" x="1101" y="766"
+          <text id="sfcSGEVPwr" text-anchor="middle" x="${evx}" y="${evy + 88}"
             style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
                    fill:#4FC3F7;filter:drop-shadow(0 0 4px #4FC3F7)">0 W</text>
-          ${c.ev_soc ? `<text id="sfcSGEVSoc" text-anchor="middle" x="1101" y="806"
+          ${c.ev_soc ? `<text id="sfcSGEVSoc" text-anchor="middle" x="${evx}" y="${evy + 128}"
             style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.65)">— %</text>` : ''}
           ` : ''}
 
           <!-- Réseau — center x=280 -->
-          <rect x="58" y="836" width="304" height="143" rx="9"
+          <rect x="${gx - 152}" y="${gy}" width="304" height="143" rx="9"
             fill="rgba(6,13,26,0.70)" stroke="rgba(79,195,247,0.20)" stroke-width="1.5"/>
-          <rect x="38" y="791" width="344" height="233" fill="transparent" data-detail="grid" style="pointer-events:all;cursor:pointer"/>
-          <text text-anchor="middle" x="210" y="867"
+          <rect x="${gx - 172}" y="${gy - 45}" width="344" height="233" fill="transparent" data-detail="grid" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${gx}" y="${gy + 31}"
             style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
                    fill:rgba(232,244,253,0.55)">${t(c,'node_grid').toUpperCase()}</text>
-          <text id="sfcSGGridVal" text-anchor="middle" x="210" y="921"
+          <text id="sfcSGGridVal" text-anchor="middle" x="${gx}" y="${gy + 85}"
             style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
                    fill:var(--sfc-grid,#4FC3F7);filter:drop-shadow(0 0 4px var(--sfc-grid,#4FC3F7))">0 W</text>
-          <text id="sfcSGGridSub" text-anchor="middle" x="210" y="962"
+          <text id="sfcSGGridSub" text-anchor="middle" x="${gx}" y="${gy + 126}"
             style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.6)">—</text>
 
           <!-- Maison — position réglable via home_x / home_y (défauts 720 / 387) -->
@@ -2964,16 +3014,16 @@ function buildCardHTML(cfg) {
             style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.6)">—</text>` : ''}
 
           <!-- Batterie — center x=1414 -->
-          <rect x="1269" y="686" width="290" height="143" rx="9"
+          <rect x="${bx - 145}" y="${by}" width="290" height="143" rx="9"
             fill="rgba(6,13,26,0.70)" stroke="rgba(105,255,71,0.20)" stroke-width="1.5"/>
-          <rect x="1249" y="641" width="330" height="233" fill="transparent" data-detail="battery" style="pointer-events:all;cursor:pointer"/>
-          <text text-anchor="middle" x="1414" y="717"
+          <rect x="${bx - 165}" y="${by - 45}" width="330" height="233" fill="transparent" data-detail="battery" style="pointer-events:all;cursor:pointer"/>
+          <text text-anchor="middle" x="${bx}" y="${by + 31}"
             style="font-family:monospace;font-size:calc(30px*var(--sfc-sl,1));font-weight:700;letter-spacing:3px;
                    fill:rgba(232,244,253,0.55)">${t(c,'node_battery').toUpperCase()}</text>
-          <text id="sfcSGBattVal" text-anchor="middle" x="1414" y="771"
+          <text id="sfcSGBattVal" text-anchor="middle" x="${bx}" y="${by + 85}"
             style="font-family:monospace;font-size:calc(46px*var(--sfc-sv,1));font-weight:700;
                    fill:var(--sfc-batt,#69FF47);filter:drop-shadow(0 0 4px var(--sfc-batt,#69FF47))">—</text>
-          <text id="sfcSGBattSub" text-anchor="middle" x="1414" y="813"
+          <text id="sfcSGBattSub" text-anchor="middle" x="${bx}" y="${by + 127}"
             style="font-family:monospace;font-size:calc(34px*var(--sfc-sv,1));fill:rgba(232,244,253,0.6)">—</text>
 
           <!-- Routeur 3 — badge LIBRE, placé par router3_x / router3_y (opt-in).
@@ -5043,8 +5093,8 @@ class SolarFlowCard extends HTMLElement {
     this._svgBubbles = Array.from({ length: 5 }, () => {
       const c = document.createElementNS(NS, 'circle');
       c.setAttribute('r',           (1.8 + Math.random() * 2.8).toFixed(1));
-      c.setAttribute('cx',          (1427 + Math.random() * 59).toFixed(0));
-      c.setAttribute('cy',          '610');
+      c.setAttribute('cx',          (this._gaugeOrigin()[0] + 7 + Math.random() * 59).toFixed(0));
+      c.setAttribute('cy',          String(this._gaugeOrigin()[1] + 110));
       c.setAttribute('fill',        'rgba(200,255,200,0.62)');
       c.setAttribute('opacity',     '0');
       c.setAttribute('clip-path',   'url(#sfcSVBattClip)');
@@ -5128,6 +5178,12 @@ class SolarFlowCard extends HTMLElement {
     return stops[stops.length - 1][1].join(',');
   }
 
+  // Coin haut-gauche du cylindre de la jauge batterie (scene_layout.battery_gauge)
+  _gaugeOrigin() {
+    const g = sceneLayout(this._cfg).battery_gauge;
+    return g || SCENE_LAYOUT_DEFAULTS.battery_gauge;
+  }
+
   // Dessine 3 vagues (points oscillants via tweens GSAP) sur la surface du liquide
   _drawBattWaves() {
     const fill = this._el('sfcSVBattFill');
@@ -5139,7 +5195,7 @@ class SolarFlowCard extends HTMLElement {
       return;
     }
     const surface = rectTop - 5;       // niveau moyen réel du liquide
-    const SEG = this._waveSeg, x0 = 1422, w = 71;
+    const SEG = this._waveSeg, x0 = this._gaugeOrigin()[0] + 2, w = 71;
     const rgb = this._battWaveColor || '0,220,255';
     this._waves.forEach(wv => {
       const el = this._el(wv.id); if (!el) return;
@@ -5202,7 +5258,7 @@ class SolarFlowCard extends HTMLElement {
     // ── 1. Niveau liquide avec physique élastique ─────────────────────────
     const maxH   = 110;
     const fillH  = Math.round(maxH * battSoc / 100);
-    const fillY  = 502 + (maxH - fillH);
+    const fillY  = this._gaugeOrigin()[1] + 2 + (maxH - fillH);
     const rising = battSoc > this._prevBattSVGSoc && this._prevBattSVGSoc >= 0;
     this._prevBattSVGSoc = battSoc;
 
@@ -5233,10 +5289,10 @@ class SolarFlowCard extends HTMLElement {
             const dur2  = 1.1 + Math.random() * 1.0;
             const pause = 0.4 + Math.random() * 1.3;
             const tl = gsap.timeline({ repeat: -1, delay: i * 0.42 + Math.random() * 0.3 });
-            tl.set(b,   { attr: { cy: 608 }, opacity: 0 })
+            tl.set(b,   { attr: { cy: this._gaugeOrigin()[1] + 108 }, opacity: 0 })
               .to(b,    { opacity: 0.78, duration: 0.12 })
-              .to(b,    { attr: { cy: 507 }, opacity: 0, duration: dur2, ease: 'power1.out' })
-              .set(b,   { attr: { cy: 608 } })
+              .to(b,    { attr: { cy: this._gaugeOrigin()[1] + 7 }, opacity: 0, duration: dur2, ease: 'power1.out' })
+              .set(b,   { attr: { cy: this._gaugeOrigin()[1] + 108 } })
               .to({},   { duration: pause });
             return tl;
           });
@@ -5269,9 +5325,7 @@ class SolarFlowCard extends HTMLElement {
     this._setFlowActive(evIds, active);
     if (active && c.img_scene_mode === 'single') {
       // Inverser le chemin selon direction charge/V2H
-      const pathCharge = 'M916.5 597.5 H1140';
-      const pathV2H    = 'M1140 597.5 H916.5';
-      this._setFlowPath(evIds, isV2H ? pathV2H : pathCharge);
+      this._setFlowPath(evIds, scenePath(sceneLayout(c).flow_ev, isV2H));
     }
 
     // Chip SVG — puissance ± et SOC
@@ -6126,9 +6180,7 @@ class SolarFlowCard extends HTMLElement {
         // Chemin mode separate/emoji (viewBox 420×100)
         const path   = gridW < -50 ? 'M 195,40 L 65,40'    : 'M 65,40 L 195,40';
         // Chemin mode single (viewBox 1536×1024) — tracé Figma
-        const path_s = gridW < -50
-          ? 'M748 608 L579 660.5 L860.5 704.5 L426 915.5'
-          : 'M426 915.5 L860.5 704.5 L579 660.5 L748 608';
+        const path_s = scenePath(sceneLayout(c).flow_grid, gridW < -50);
         this._setFlowPath(gridFlowIds,   path);
         this._setFlowPath(gridFlowIds_s, path_s);
       }
@@ -6144,11 +6196,11 @@ class SolarFlowCard extends HTMLElement {
       this._setFlowActive([...battFlowIds, ...battFlowIds_s], battActive);
       if (isDischarging) {
         this._setFlowPath(battFlowIds,   'M 355,40 L 225,40');
-        this._setFlowPath(battFlowIds_s, 'M1402 639.5 L945 623.5');
+        this._setFlowPath(battFlowIds_s, scenePath(sceneLayout(c).flow_battery, true));
         lb.setAttribute('marker-end', 'url(#arrowDis)');
       } else {
         this._setFlowPath(battFlowIds,   'M 225,40 L 355,40');
-        this._setFlowPath(battFlowIds_s, 'M945 623.5 L1402 639.5');
+        this._setFlowPath(battFlowIds_s, scenePath(sceneLayout(c).flow_battery, false));
         lb.setAttribute('marker-end', 'url(#arrowBatt)');
       }
     }
@@ -6353,7 +6405,7 @@ class SolarFlowCard extends HTMLElement {
       if (svFill) {
         const maxH  = 110;
         const fillH = Math.round(maxH * battSoc / 100);
-        const fillY = 502 + (maxH - fillH);
+        const fillY = this._gaugeOrigin()[1] + 2 + (maxH - fillH);
         svFill.setAttribute('y', String(fillY + 5));
         svFill.setAttribute('height', String(Math.max(0, fillH - 5)));
         const levelRGB = this._battLevelRGB(battSoc);
