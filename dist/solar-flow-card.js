@@ -4689,6 +4689,7 @@ class SolarFlowCard extends HTMLElement {
   // Applique la config (fusionnée aux DEFAULTS), (re)génère le DOM et lance le timer soleil.
   setConfig(config) {
     this._cfg = { ...DEFAULTS, ...config };
+    this._calib = null;   // un nouveau YAML remplace tout calage en cours
     this._render();
     this._startSunTimer();
   }
@@ -4715,12 +4716,150 @@ class SolarFlowCard extends HTMLElement {
         @import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;600;700&display=swap');
         ${CARD_CSS}
       </style>
-      ${buildCardHTML(this._cfg)}
+      ${buildCardHTML(this._calibConfig())}
     `;
     this._createStars();
     this._loadGSAP();
     this._attachDetail();
     this._initSceneRenderer();
+    this._initCalibration();
+  }
+
+  // ────────────────────────────────────────────────────────
+  //  MODE CALAGE (scene_calibrate: true) — scène single uniquement
+  // ────────────────────────────────────────────────────────
+  // Outil pour caler la scène sur une autre image : on choisit un élément, on clique sur
+  // l'image, la scène se redessine aussitôt et le YAML à coller est affiché.
+  // Flux = clics successifs du départ à l'arrivée · badge = un clic (centre / bord haut)
+  // jauge batterie = un clic (coin haut-gauche). Rien n'est enregistré dans la config :
+  // le YAML est à copier dans la carte, puis scene_calibrate est à retirer.
+  _calibActive() {
+    const c = this._cfg || {};
+    return c.scene_calibrate === true && c.img_scene_mode === 'single' && c.show_images !== false;
+  }
+
+  // Config utilisée pour le rendu : celle du YAML, plus le calage en cours.
+  _calibConfig() {
+    if (!this._calibActive() || !this._calib) return this._cfg;
+    const k = this._calib;
+    return { ...this._cfg, scene_layout: { ...k.layout }, ...k.extra };
+  }
+
+  _initCalibration() {
+    if (!this._calibActive()) return;
+    const scene = this._el('sfcUnifiedScene');
+    const svg = this._el('sfcSingleFlowSvg');
+    if (!scene || !svg) return;
+    const c = this._cfg;
+    if (!this._calib) {
+      const layout = (c.scene_layout && typeof c.scene_layout === 'object') ? JSON.parse(JSON.stringify(c.scene_layout)) : {};
+      const extra = {};
+      ['home_x', 'home_y', 'router3_x', 'router3_y'].forEach(k => { if (c[k] != null) extra[k] = c[k]; });
+      this._calib = { layout, extra, sel: 'flow_grid' };
+    }
+    const k = this._calib;
+    const keys = [...Object.keys(SCENE_LAYOUT_DEFAULTS), 'home', ...(c.router3_enabled ? ['router3'] : [])];
+
+    // Points de l'élément sélectionné, dessinés sur la scène
+    const NS = 'http://www.w3.org/2000/svg';
+    const pts = this._calibPoints(k.sel);
+    pts.forEach((q, i) => {
+      const dot = document.createElementNS(NS, 'circle');
+      dot.setAttribute('cx', q[0]); dot.setAttribute('cy', q[1]); dot.setAttribute('r', '14');
+      dot.setAttribute('fill', i === 0 ? '#ff4081' : '#ffeb3b');
+      dot.setAttribute('stroke', '#000'); dot.setAttribute('stroke-width', '4');
+      svg.appendChild(dot);
+    });
+
+    // Couche qui reçoit les clics (au-dessus de l'image, sous la barre d'outils)
+    const layer = document.createElement('div');
+    layer.style.cssText = 'position:absolute;inset:0;z-index:30;cursor:crosshair;';
+    layer.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const sp = svg.createSVGPoint();
+      sp.x = e.clientX; sp.y = e.clientY;
+      const m = svg.getScreenCTM();
+      if (!m) return;
+      const q = sp.matrixTransform(m.inverse());
+      const pt = [Math.round(q.x), Math.round(q.y)];
+      if (k.sel.startsWith('flow_')) {
+        const cur = Array.isArray(k.layout[k.sel]) && k.layout[k.sel]._calib ? k.layout[k.sel] : [];
+        const next = [...cur, pt];
+        next._calib = true;
+        k.layout[k.sel] = next;
+      } else if (k.sel === 'home') {
+        k.extra.home_x = pt[0]; k.extra.home_y = pt[1];
+      } else if (k.sel === 'router3') {
+        k.extra.router3_x = pt[0]; k.extra.router3_y = pt[1];
+      } else {
+        k.layout[k.sel] = pt;
+      }
+      this._calibRefresh();
+    });
+    scene.appendChild(layer);
+
+    // Barre d'outils
+    const bar = document.createElement('div');
+    bar.style.cssText = 'position:absolute;left:6px;right:6px;top:6px;z-index:31;display:flex;flex-wrap:wrap;gap:6px;align-items:center;'
+      + 'background:rgba(6,13,26,.85);border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:6px;font:12px monospace;color:#e8f4fd;';
+    const opt = keys.map(x => `<option value="${x}" ${x === k.sel ? 'selected' : ''}>${x}</option>`).join('');
+    bar.innerHTML = `<b>CALAGE</b><select data-c="sel" style="font:12px monospace">${opt}</select>`
+      + `<button data-c="undo">↶</button><button data-c="clear">✕</button><button data-c="copy">YAML</button>`
+      + `<span style="opacity:.75">${k.sel.startsWith('flow_') ? 'clic = point suivant (départ → arrivée)' : 'clic = position'}</span>`
+      + `<textarea data-c="yaml" readonly rows="3" style="width:100%;font:11px monospace;background:#000;color:#9f9;border:0">${this._calibYaml()}</textarea>`;
+    bar.addEventListener('click', (e) => e.stopPropagation());
+    bar.querySelector('[data-c=sel]').addEventListener('change', (e) => { k.sel = e.target.value; this._calibRefresh(); });
+    bar.querySelector('[data-c=undo]').addEventListener('click', () => {
+      if (k.sel.startsWith('flow_') && Array.isArray(k.layout[k.sel])) {
+        const next = k.layout[k.sel].slice(0, -1);
+        next._calib = true;
+        if (next.length) k.layout[k.sel] = next; else delete k.layout[k.sel];
+        this._calibRefresh();
+      }
+    });
+    bar.querySelector('[data-c=clear]').addEventListener('click', () => {
+      if (k.sel === 'home') { delete k.extra.home_x; delete k.extra.home_y; }
+      else if (k.sel === 'router3') { delete k.extra.router3_x; delete k.extra.router3_y; }
+      else delete k.layout[k.sel];
+      this._calibRefresh();
+    });
+    bar.querySelector('[data-c=copy]').addEventListener('click', () => {
+      const ta = bar.querySelector('[data-c=yaml]');
+      ta.select();
+      try { navigator.clipboard.writeText(ta.value); } catch (err) { document.execCommand('copy'); }
+    });
+    scene.appendChild(bar);
+  }
+
+  // Points actuellement connus pour un élément (calage en cours, sinon YAML, sinon défaut)
+  _calibPoints(sel) {
+    const k = this._calib;
+    if (sel === 'home') return [[Number(k.extra.home_x) || 720, Number(k.extra.home_y) || 387]];
+    if (sel === 'router3') return [[Number(k.extra.router3_x) || 560, Number(k.extra.router3_y) || 600]];
+    if (sel.startsWith('flow_') && Array.isArray(k.layout[sel])) return k.layout[sel];   // tracé en cours (même 1 point)
+    const v = sceneLayout({ scene_layout: k.layout })[sel];
+    if (!v) return [];
+    return sel.startsWith('flow_') ? v : [v];
+  }
+
+  // Bloc YAML à coller dans la carte (uniquement ce qui a été réglé)
+  _calibYaml() {
+    const k = this._calib;
+    const fmt = v => JSON.stringify(v).replace(/,/g, ', ');
+    const lines = [];
+    const keys = Object.keys(k.layout).filter(x => x in SCENE_LAYOUT_DEFAULTS);
+    if (keys.length) {
+      lines.push('scene_layout:');
+      keys.forEach(x => lines.push(`  ${x}: ${fmt(k.layout[x])}`));
+    }
+    ['home_x', 'home_y', 'router3_x', 'router3_y'].forEach(x => { if (k.extra[x] != null) lines.push(`${x}: ${k.extra[x]}`); });
+    return lines.join('\n') || '# cliquer sur l\'image pour placer l\'élément choisi';
+  }
+
+  // Redessine la carte avec le calage en cours (les valeurs HA sont réappliquées)
+  _calibRefresh() {
+    this._render();
+    if (this._hass) this._update();
   }
 
   // ────────────────────────────────────────────────────────
