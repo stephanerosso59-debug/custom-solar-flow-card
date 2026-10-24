@@ -732,6 +732,16 @@ scene_season_entity: sensor.season   # optional: Season integration (winter/spri
 - Without `scene_season_entity`, the season follows the month: winter Dec-Feb, spring Mar-May, summer Jun-Aug, autumn Sep-Nov (shifted by 6 months when `latitude` < 0).
 - A season missing from the list, or a missing `night` picture, falls back to the usual pictures (`img_scene_day` / `img_scene_night` and variants). All pictures must share **the same framing**: flows and badges do not move.
 
+### Sky clouds
+
+```yaml
+scene_clouds: natural       # cumulus-like clouds (several puffs) instead of a blurred oval; day or night colours
+scene_night_clouds: dim     # CSS sky only: at night, clouds darkened (dim) or faded out (hide)
+```
+
+- `natural`: by day, white clouds with a lit top; at night, dark blue-grey and discreet, with a slightly bluish top (moonlight). The number of clouds still follows the weather entity's cloud coverage.
+- `scene_night_clouds` only affects the CSS sky; with the canvas sky (single scene), use `scene_clouds`.
+
 ### Section order
 
 Reorder how the blocks under the scene are displayed, from the editor (**🔃 Sections order** section, ▲ / ▼ buttons) or in YAML via `section_order`:

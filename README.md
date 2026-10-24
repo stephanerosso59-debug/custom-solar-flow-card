@@ -736,6 +736,16 @@ scene_season_entity: sensor.season   # optionnel : intégration Season (winter/s
 - Sans `scene_season_entity`, la saison suit le mois : hiver déc-fév, printemps mars-mai, été juin-août, automne sept-nov (décalée de 6 mois si `latitude` < 0).
 - Une saison absente de la liste, ou une image `night` absente, reprend les images habituelles (`img_scene_day` / `img_scene_night` et variantes). Toutes les images doivent avoir **le même cadrage** : les flux et les encarts ne bougent pas.
 
+### Nuages du ciel
+
+```yaml
+scene_clouds: natural       # nuages en cumulus (plusieurs boules) au lieu d'un ovale flou ; couleurs de jour ou de nuit
+scene_night_clouds: dim     # ciel sans canvas uniquement : la nuit, nuages assombris (dim) ou effacés (hide)
+```
+
+- `natural` : le jour, nuages blancs au dessus éclairé ; la nuit, gris-bleu sombre et discrets, au dessus légèrement bleuté (lumière de lune). Le nombre de nuages suit toujours la couverture nuageuse de l'entité météo.
+- `scene_night_clouds` ne concerne que le ciel en CSS ; avec le ciel canvas (scène single), utilisez `scene_clouds`.
+
 ### Ordre des sections
 
 Réorganisez l'ordre d'affichage des blocs sous la scène depuis l'éditeur (section **🔃 Ordre des sections**, boutons ▲ / ▼) ou en YAML via `section_order` :

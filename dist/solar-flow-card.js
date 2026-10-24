@@ -4546,12 +4546,46 @@ class SfcSceneRenderer {
       }
       if (i >= visible) continue;   // au-delà du quota de couverture → non dessiné
       const puffRadius = 46 * cloud.scale;
+      if (this.state.cloudStyle === 'natural') { this.drawNaturalCloud(ctx, cloud, puffRadius); continue; }
       const gradient = ctx.createRadialGradient(cloud.x, cloud.y, 0, cloud.x, cloud.y, puffRadius * 2.2);
       gradient.addColorStop(0, 'rgba(230, 234, 240, ' + cloud.opacity + ')');
       gradient.addColorStop(1, 'rgba(230, 234, 240, 0)');
       ctx.fillStyle = gradient;
       ctx.beginPath();
       ctx.ellipse(cloud.x, cloud.y, puffRadius * 2.2, puffRadius * 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Nuage « naturel » (scene_clouds: natural) : 7 boules qui se chevauchent, plus hautes au centre,
+  // base aplatie. Le jour : blanc, dessus éclairé. La nuit : gris-bleu sombre et discret, dessus
+  // légèrement bleuté (lumière de lune). La forme de chaque nuage est tirée une fois et reste stable.
+  drawNaturalCloud(ctx, cloud, r) {
+    if (!cloud.puffs) {
+      const n = 7;
+      cloud.puffs = Array.from({ length: n }, (_, k) => {
+        const t = k / (n - 1);
+        const bump = Math.sin(t * Math.PI);
+        return { dx: (t - 0.5) * 3.4, dy: -bump * 0.5 + (((k * 37) % 7) - 3) * 0.03, rr: 0.5 + bump * 0.6 + ((k * 53) % 5) * 0.04 };
+      });
+    }
+    const day = this.state.isDay;
+    const a = cloud.opacity * (day ? 0.95 : 0.6);
+    const body = day ? '238,242,248' : '34,44,64';
+    const top = day ? '255,255,255' : '112,132,168';
+    const shade = day ? '196,204,216' : '22,28,42';
+    for (const p of cloud.puffs) {
+      const x = cloud.x + p.dx * r;
+      const y = cloud.y + p.dy * r;
+      const rad = p.rr * r;
+      const g = ctx.createRadialGradient(x, y - rad * 0.4, rad * 0.05, x, y + rad * 0.2, rad);
+      g.addColorStop(0, 'rgba(' + top + ',' + a + ')');
+      g.addColorStop(0.45, 'rgba(' + body + ',' + (a * 0.92) + ')');
+      g.addColorStop(0.8, 'rgba(' + shade + ',' + (a * 0.55) + ')');
+      g.addColorStop(1, 'rgba(' + shade + ',0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -4980,6 +5014,7 @@ class SolarFlowCard extends HTMLElement {
     this._sceneRenderer.setState({
       category: sfcConditionToScene(cond),
       isDay: elevation >= -3,
+      cloudStyle: c.scene_clouds || '',
       quality: (['low', 'medium', 'high'].includes(c.sky_quality) ? c.sky_quality : 'medium'),
       intensity: 1,
       windSpeedKmh: windKmh,
@@ -7170,6 +7205,18 @@ class SolarFlowCard extends HTMLElement {
       const isPartly = wi && wi.cloud <= 0.55 && wi.cloudy && !wi.rain && !wi.snow && !wi.fog && !wi.storm;
       partlyClouds.style.opacity = isPartly ? '1' : '0';
     }
+    // scene_night_clouds : la nuit, les nuages blancs sont trop visibles sur le ciel sombre.
+    // dim → assombris et plus transparents ; hide → effacés. Transition progressive entre 0° et -6°.
+    const nightMode = c.scene_night_clouds;
+    const nightK = elevation < 0 ? Math.min(1, -elevation / 6) : 0;
+    [clouds, partlyClouds].forEach(el => {
+      if (!el) return;
+      if ((nightMode !== 'dim' && nightMode !== 'hide') || nightK === 0) { el.style.filter = ''; return; }
+      const op = parseFloat(el.style.opacity) || 0;
+      if (nightMode === 'hide') { el.style.opacity = (op * (1 - nightK)).toFixed(2); el.style.filter = ''; return; }
+      el.style.opacity = (op * (1 - 0.6 * nightK)).toFixed(2);
+      el.style.filter = 'brightness(' + (1 - 0.75 * nightK).toFixed(2) + ')';
+    });
 
     const stl = this._el('sfcSunTime');
     if (stl) stl.textContent = now.toLocaleTimeString(c.language==='en'?'en-GB':'fr-FR',{hour:'2-digit',minute:'2-digit'}) + ' · ' + Math.round(elevation) + '°';
